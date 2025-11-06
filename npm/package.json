@@ -1,0 +1,24 @@
+{
+  "name": "@muthuishere/spinx",
+  "version": "0.1.0",
+  "description": "Deploy once. Run anywhere. Multi-cloud deployment CLI for AWS Fargate, GCP Cloud Run, and Azure Container Apps — all with a single command.",
+  "keywords": ["cli", "deployment", "aws", "gcp", "azure", "fargate", "cloud-run", "container-apps", "multi-cloud", "devops"],
+  "bin": {
+    "spinx": "bin/spinx"
+  },
+  "scripts": {
+  },
+  "author": "Muthukumaran Navaneethakrishnan",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/muthuishere/spinx.git"
+  },
+  "homepage": "https://github.com/muthuishere/spinx#readme",
+  "bugs": {
+    "url": "https://github.com/muthuishere/spinx/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,0 +1,43 @@
+#!/usr/bin/env node
+const { spawn, execSync } = require("child_process");
+const path = require("path");
+const fs = require("fs");
+
+// Check if Java is installed
+function checkJavaInstalled() {
+  try {
+    execSync("java -version 2>&1", { encoding: "utf8" });
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      throw new Error(
+        "Java is not installed or not found in PATH. Spinx requires Java 21 or higher.",
+      );
+    }
+    throw error;
+  }
+}
+
+// Check Java installation before proceeding
+try {
+  checkJavaInstalled();
+} catch (error) {
+  console.error(`Error: ${error.message}`);
+  console.error(
+    "Please install Java 21 or higher and ensure it's in your PATH.",
+  );
+  process.exit(1);
+}
+
+// Get the jar from the libs directory relative to this script
+const jar = path.join(__dirname, "..", "libs", "spinx-lib.jar");
+
+if (!fs.existsSync(jar)) {
+  console.error(
+    "Spinx JAR not found. Reinstall the package or run `npm rebuild spinx`.",
+  );
+  process.exit(1);
+}
+
+const args = process.argv.slice(2);
+const p = spawn("java", ["-jar", jar, ...args], { stdio: "inherit" });
+p.on("exit", (code) => process.exit(code));

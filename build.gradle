@@ -1,0 +1,148 @@
+plugins {
+    id 'java'
+    id 'application'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
+    id 'org.jreleaser' version '1.14.0'
+}
+
+group = 'tools.muthuishere'
+version = '0.1.0'
+
+java {
+    toolchain { languageVersion = JavaLanguageVersion.of(21) }
+    withJavadocJar()
+    withSourcesJar()
+}
+
+repositories { mavenCentral() }
+
+dependencies {
+    implementation platform('software.amazon.awssdk:bom:2.28.25')
+    implementation platform('com.google.cloud:libraries-bom:26.47.0')
+    implementation platform('com.azure:azure-sdk-bom:1.2.26')
+    
+    // Force consistent Netty versions to avoid conflicts with Azure SDK
+    implementation platform('io.netty:netty-bom:4.1.104.Final')
+
+    implementation 'info.picocli:picocli:4.7.6'
+    annotationProcessor 'info.picocli:picocli-codegen:4.7.6'
+
+    implementation 'com.amazonaws:aws-lambda-java-core:1.2.3'
+    implementation 'com.amazonaws:aws-lambda-java-events:3.11.4'
+    implementation 'software.amazon.awssdk:lambda'
+    implementation 'software.amazon.awssdk:ecr'
+    implementation 'software.amazon.awssdk:iam'
+    implementation 'software.amazon.awssdk:sts'
+    implementation 'software.amazon.awssdk:apprunner'
+    implementation 'software.amazon.awssdk:ecs'
+    implementation 'software.amazon.awssdk:ec2'
+    implementation 'software.amazon.awssdk:elasticloadbalancingv2'
+    implementation 'software.amazon.awssdk:cloudwatchlogs'
+
+    implementation 'com.azure.resourcemanager:azure-resourcemanager:2.43.0'
+    implementation 'com.azure:azure-identity:1.13.2'
+    implementation 'com.azure.resourcemanager:azure-resourcemanager-loganalytics:1.1.0'
+    implementation 'com.azure.resourcemanager:azure-resourcemanager-appcontainers:1.1.0'
+
+    implementation 'com.google.cloud:google-cloud-run'
+    implementation 'com.google.cloud:google-cloud-artifact-registry'
+
+    compileOnly 'org.projectlombok:lombok:1.18.34'
+    annotationProcessor 'org.projectlombok:lombok:1.18.34'
+    implementation 'io.github.cdimascio:dotenv-java:3.0.2'
+    implementation 'org.yaml:snakeyaml:2.2'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.3'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+application {
+    mainClass = 'tools.muthuishere.spinx.SpinxCli'
+    applicationDefaultJvmArgs = ['-Dfile.encoding=UTF-8']
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 21
+}
+
+tasks.jar {
+    manifest {
+        attributes(
+                'Main-Class': 'tools.muthuishere.spinx.SpinxCli',
+                'Implementation-Title': 'spinx',
+                'Implementation-Version': project.version
+        )
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+tasks.shadowJar {
+    archiveClassifier.set('all')
+    manifest { attributes('Main-Class': 'tools.muthuishere.spinx.SpinxCli') }
+    zip64 = true
+}
+
+distributions {
+    main { distributionBaseName.set('spinx') }
+}
+
+tasks.test {
+    useJUnitPlatform()
+    testLogging { events 'failed', 'skipped'; exceptionFormat 'full' }
+}
+
+
+
+tasks.register('createNpmLib') {
+    group = 'publishing'
+    description = 'Creates a jar and copies it to npm/libs/spinx-lib.jar for npm publishing'
+    
+    dependsOn shadowJar
+    
+    doLast {
+        def sourceJar = tasks.shadowJar.archiveFile.get().asFile
+        def targetDir = file('npm/libs')
+        def targetJar = file('npm/libs/spinx-lib.jar')
+        
+        // Create target directory if it doesn't exist
+        targetDir.mkdirs()
+        
+        // Copy jar file, replacing if it exists
+        copy {
+            from sourceJar
+            into targetDir
+            rename { 'spinx-lib.jar' }
+        }
+        
+        println "Published jar to ${targetJar.absolutePath}"
+    }
+}
+
+jreleaser {
+    project {
+        name = 'spinx'
+        description = 'Spinx — the multi-cloud deployment CLI for AWS, Azure, and GCP.'
+        website = 'https://github.com/muthuishere/spinx'
+        authors = ['Muthukumaran Navaneethakrishnan']
+        license = 'MIT'
+        version = project.version.toString()
+    }
+    release {
+        github {
+            repoOwner = 'muthuishere'
+            name = 'spinx'
+            overwrite = true
+            changelog {
+                formatted = 'ALWAYS'
+                preset = 'conventional'
+            }
+        }
+    }
+    files {
+        artifacts {
+            artifact { path = "build/libs/${project.name}-${project.version}-all.jar" }
+            artifact { path = "build/distributions/${project.name}-${project.version}.zip" }
+        }
+    }
+}

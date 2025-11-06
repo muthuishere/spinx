@@ -1,0 +1,27 @@
+version: '3'
+
+dotenv: ['.env']
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  create-npm-library:
+    desc: Create the jar library for npm package
+    cmds:
+      - ./gradlew createNpmLib
+
+  npm-spinx:
+    desc: Run spinx command with arguments (use -- to pass args)
+    cmds:
+      - node npm/bin/spinx {{.CLI_ARGS}}
+
+  local-install:
+    desc: Build jar library and install spinx globally from the npm package
+    deps: [create-npm-library]
+    dir: npm
+    cmds:
+      - npm install -g .
+ 
