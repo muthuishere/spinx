@@ -103,7 +103,7 @@ tasks.register('createDistZip', Zip) {
     archiveFileName = 'spinx.zip'
     destinationDirectory = layout.buildDirectory.dir('dist-zip')
     from('dist') {
-        include 'spinx.jar', 'spinx', 'spinx.bat'
+        include 'spinx.jar', 'spinx', 'spinx.cmd'
     }
 }
 
@@ -133,9 +133,10 @@ exec java -jar "\$(dirname "\$0")/spinx.jar" "\$@"
 """
         unixScript.setExecutable(true)
 
-        // Windows batch script wrapper
-        def batScript = file('dist/spinx.bat')
-        batScript.text = "@echo off\r\njava -jar \"%~dp0spinx.jar\" %*\r\n"
+        // Windows launcher script (.cmd picked up by cmd.exe, PowerShell, and Windows Terminal)
+        // %~dp0 expands to the directory of this script, so spinx.jar is always found automatically.
+        def cmdScript = file('dist/spinx.cmd')
+        cmdScript.text = "@echo off\r\njava -jar \"%~dp0spinx.jar\" %*\r\n"
 
         println ''
         println '==================================================='
