@@ -43,54 +43,35 @@ Multi-cloud deployment CLI for AWS Fargate, AWS Lambda, GCP Cloud Run, and Azure
 
 ---
 
-### 2️⃣ Install via npm (Recommended)
+### 2️⃣ Install via npm
 
-**Option A – Run with `npx` (no install needed):**
+**Option A – One-off usage with `npx` (no install, no admin needed):**
 
 ```bash
 npx @muthuishere/spinx aws-fargate deploy -c ./examples/fargateconfig.yaml
 ```
 
-**Option B – Global install:**
+**Option B – Global install (requires admin/sudo):**
 
 ```bash
 npm install -g @muthuishere/spinx
 spinx aws-fargate deploy -c ./examples/fargateconfig.yaml
 ```
 
-> **Admin/sudo issue with `npm install -g`?**  
-> Configure npm to use a user-writable prefix (one-time setup):
-> ```bash
-> # Unix/macOS
-> npm config set prefix ~/.npm-global
-> export PATH="$HOME/.npm-global/bin:$PATH"   # add to ~/.bashrc or ~/.zshrc
-> npm install -g @muthuishere/spinx
-> ```
-> On Windows, see [npm docs on changing the global prefix](https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally).
-> Or use the `dist/` approach below — no npm required at all.
-
 ---
 
-### 3️⃣ Clone and Install Locally (no npm, no admin required)
+### 3️⃣ Standalone install (no npm, no admin required)
 
+Download the pre-built zip from [GitHub Releases](https://github.com/muthuishere/spinx/releases), extract it, and add the folder to your `PATH`:
+
+**Unix / macOS:**
 ```bash
-git clone https://github.com/muthuishere/spinx.git
-cd spinx
-task local-install
+curl -LO https://github.com/muthuishere/spinx/releases/latest/download/spinx.zip
+unzip spinx.zip -d ~/.spinx
+export PATH="$HOME/.spinx:$PATH"   # add to ~/.bashrc or ~/.zshrc
 ```
 
-This will:
-- Build the fat JAR
-- Create a `dist/` directory containing `spinx.jar`, a Unix shell script (`spinx`), and a Windows batch file (`spinx.bat`)
-
-Then add the `dist/` directory to your `PATH` once:
-
-**Unix / macOS** – add to `~/.bashrc` or `~/.zshrc`:
-```bash
-export PATH="/path/to/spinx/dist:$PATH"
-```
-
-**Windows** – add the `dist\` folder to your System/User Environment `Path` variable.
+**Windows** – download `spinx.zip` from [GitHub Releases](https://github.com/muthuishere/spinx/releases), extract it to a folder (e.g. `%USERPROFILE%\.spinx`), then add that folder to your user `Path` via System Settings.
 
 Now you can run `spinx` from anywhere:
 
@@ -100,17 +81,51 @@ spinx aws-fargate deploy -c ./examples/fargateconfig.yaml
 
 ---
 
-### 4️⃣ Manual Build and Run (without any install)
+### 4️⃣ Build from source and install locally
 
 ```bash
-./gradlew shadowJar
-java -jar build/libs/spinx-0.1.0-all.jar <provider> <action> -c <config.yaml>
+git clone https://github.com/muthuishere/spinx.git
+cd spinx
+task local-install
 ```
 
-Example:
+This builds the fat JAR and creates a `dist/` directory with `spinx.jar` and wrapper scripts. Add `dist/` to your `PATH` to use `spinx` globally.
+
+---
+
+### 5️⃣ Manual Build and Run (without global install)
+
+Build and run directly from the cloned source — no install step, no PATH changes needed:
 
 ```bash
+git clone https://github.com/muthuishere/spinx.git
+cd spinx
+./gradlew shadowJar
+```
+
+Then run with `java -jar`:
+
+```bash
+java -jar build/libs/spinx-<version>-all.jar <provider> <action> -c <config.yaml>
+```
+
+**Examples** (replace `<version>` with the actual version, e.g. `0.1.0`):
+
+```bash
+# AWS Fargate
+java -jar build/libs/spinx-0.1.0-all.jar aws-fargate deploy -c ./examples/fargateconfig.yaml
+
+# GCP Cloud Run
 java -jar build/libs/spinx-0.1.0-all.jar gcp-cloudrun deploy -c ./examples/cloudrunconfig.yaml
+
+# Azure Container Apps
+java -jar build/libs/spinx-0.1.0-all.jar azure-container-apps deploy -c ./examples/azurecontainerappsconfig.yaml
+```
+
+Or run directly via Gradle (no JAR build step required):
+
+```bash
+./gradlew run --args="aws-fargate deploy -c ./examples/fargateconfig.yaml"
 ```
 
 ---

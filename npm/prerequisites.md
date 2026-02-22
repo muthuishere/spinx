@@ -4,26 +4,35 @@ This guide covers the prerequisites for using Spinx via NPM installation.
 
 ## 📦 Installation
 
-**Option A – Run with `npx` (no install needed):**
+**Option A – One-off usage with `npx` (no install, no admin needed):**
 
 ```bash
 npx @muthuishere/spinx <provider> <action> -c <config-file>
 ```
 
-**Option B – Global install:**
+**Option B – Global install (requires admin/sudo):**
 
 ```bash
 npm install -g @muthuishere/spinx
 ```
 
-> **Admin/sudo issue with `npm install -g`?**  
-> Configure npm to use a user-writable prefix (one-time setup, no admin needed):
-> ```bash
-> npm config set prefix ~/.npm-global
-> export PATH="$HOME/.npm-global/bin:$PATH"   # add to ~/.bashrc or ~/.zshrc
-> npm install -g @muthuishere/spinx
-> ```
-> On Windows, see [npm docs on resolving permission errors](https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally).
+**Option C – Standalone install (no npm, no admin needed):**
+
+Download the pre-built zip from [GitHub Releases](https://github.com/muthuishere/spinx/releases), extract it, and add the folder to your `PATH`:
+
+```bash
+# Unix/macOS
+curl -LO https://github.com/muthuishere/spinx/releases/latest/download/spinx.zip
+unzip spinx.zip -d ~/.spinx
+export PATH="$HOME/.spinx:$PATH"   # add to ~/.bashrc or ~/.zshrc
+```
+
+```bat
+:: Windows – download spinx.zip from GitHub Releases, then:
+mkdir %USERPROFILE%\.spinx
+tar -xf spinx.zip -C %USERPROFILE%\.spinx
+:: Add %USERPROFILE%\.spinx to your user PATH via System Settings
+```
 
 ---
 
@@ -243,16 +252,15 @@ spinx aws-fargate destroy -c ./config/fargateconfig.yaml
 
 ### "Command not found: spinx"
 ```bash
-# Use npx to run without installing:
+# Option 1 – use npx (no install needed):
 npx @muthuishere/spinx --version
 
-# Or reinstall globally:
+# Option 2 – reinstall globally (requires admin):
 npm install -g @muthuishere/spinx
 
-# If you get permission errors, configure a user-writable npm prefix:
-npm config set prefix ~/.npm-global
-export PATH="$HOME/.npm-global/bin:$PATH"
-npm install -g @muthuishere/spinx
+# Option 3 – standalone install, no admin needed:
+# Download spinx.zip from https://github.com/muthuishere/spinx/releases
+# Extract and add the bin/ folder to your PATH
 ```
 
 ### Docker Build Failures

@@ -94,6 +94,19 @@ tasks.test {
 
 
 
+tasks.register('createDistZip', Zip) {
+    group = 'distribution'
+    description = 'Package the standalone dist/ into spinx.zip for GitHub Releases (no admin needed to install)'
+
+    dependsOn 'createLocalDist'
+
+    archiveFileName = 'spinx.zip'
+    destinationDirectory = layout.buildDirectory.dir('dist-zip')
+    from('dist') {
+        include 'spinx.jar', 'spinx', 'spinx.bat'
+    }
+}
+
 tasks.register('createLocalDist') {
     group = 'distribution'
     description = 'Build fat JAR and create dist/ with wrapper scripts for local PATH install (no admin required)'
@@ -187,6 +200,7 @@ jreleaser {
         artifacts {
             artifact { path = "build/libs/${project.name}-${project.version}-all.jar" }
             artifact { path = "build/distributions/${project.name}-${project.version}.zip" }
+            artifact { path = tasks.named('createDistZip').get().archiveFile.get().asFile.path }
         }
     }
 }
