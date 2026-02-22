@@ -5,8 +5,15 @@ This guide covers the prerequisites for using Spinx via NPM installation.
 ## 📦 Installation
 
 ```bash
-npm install -g @muthuishere/spinx
+npm install -g @muthuishere/spinx --prefix ${HOME}/.npm-global
 ```
+
+> **No sudo required!** This installs to `~/.npm-global` in your home directory.
+> Make sure `~/.npm-global/bin` is in your PATH:
+> ```bash
+> export PATH="$HOME/.npm-global/bin:$PATH"
+> ```
+> Add that line to your `~/.bashrc`, `~/.zshrc`, or equivalent shell profile.
 
 ---
 
@@ -226,10 +233,13 @@ spinx aws-fargate destroy -c ./config/fargateconfig.yaml
 
 ### "Command not found: spinx"
 ```bash
-# Reinstall globally
-npm install -g @muthuishere/spinx
+# Reinstall to user prefix (no sudo needed)
+npm install -g @muthuishere/spinx --prefix ${HOME}/.npm-global
 
-# Check if npm global bin is in PATH
+# Check if npm user bin is in PATH
+echo $PATH | grep -q ".npm-global/bin" || echo "Add \$HOME/.npm-global/bin to your PATH"
+
+# Check the npm user prefix
 npm config get prefix
 ```
 

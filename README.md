@@ -53,7 +53,13 @@ task local-install
 
 This will:
 - Build the JAR library 
-- Install spinx globally via npm
+- Install spinx to `~/.npm-global` (no `sudo` required)
+
+> **Note:** If `spinx` is not found after install, add the npm user bin directory to your PATH:
+> ```bash
+> export PATH="$HOME/.npm-global/bin:$PATH"
+> ```
+> Add that line to your `~/.bashrc`, `~/.zshrc`, or equivalent shell profile to make it permanent.
 
 Now you can run `spinx` from anywhere:
 
