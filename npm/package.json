@@ -1,6 +1,6 @@
 {
   "name": "@muthuishere/spinx",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Deploy once. Run anywhere. Multi-cloud deployment CLI for AWS Fargate, GCP Cloud Run, and Azure Container Apps — all with a single command.",
   "keywords": ["cli", "deployment", "aws", "gcp", "azure", "fargate", "cloud-run", "container-apps", "multi-cloud", "devops"],
   "bin": {

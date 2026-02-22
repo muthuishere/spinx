@@ -298,8 +298,8 @@ spinx aws-lambda deploy -c ./lambda.yaml --dry-run
 1. Tag your release
 
    ```bash
-   git tag v0.1.0
-   git push origin v0.1.0
+   git tag v0.2.0
+   git push origin v0.2.0
    ```
 2. Run the release task
 
@@ -308,8 +308,8 @@ spinx aws-lambda deploy -c ./lambda.yaml --dry-run
    ```
 3. Your GitHub Release page will include:
 
-    * `spinx-0.1.0-all.jar`
-    * `spinx-0.1.0.zip` (OS-friendly scripts)
+    * `spinx-0.2.0-all.jar`
+    * `spinx-0.2.0.zip` (OS-friendly scripts)
 
 ---
 
