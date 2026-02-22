@@ -94,6 +94,50 @@ tasks.test {
 
 
 
+tasks.register('createLocalDist') {
+    group = 'distribution'
+    description = 'Build fat JAR and create dist/ with wrapper scripts for local PATH install (no admin required)'
+
+    dependsOn shadowJar
+
+    doLast {
+        def distDir = file('dist')
+        distDir.mkdirs()
+
+        // Copy fat JAR into dist/
+        copy {
+            from tasks.shadowJar.archiveFile.get().asFile
+            into distDir
+            rename { 'spinx.jar' }
+        }
+
+        // Unix shell script wrapper
+        def unixScript = file('dist/spinx')
+        unixScript.text = """\
+#!/bin/sh
+exec java -jar "\$(dirname "\$0")/spinx.jar" "\$@"
+"""
+        unixScript.setExecutable(true)
+
+        // Windows batch script wrapper
+        def batScript = file('dist/spinx.bat')
+        batScript.text = "@echo off\r\njava -jar \"%~dp0spinx.jar\" %*\r\n"
+
+        println ''
+        println '==================================================='
+        println " Spinx distribution created in: ${distDir.absolutePath}"
+        println '==================================================='
+        println ' Add the dist folder to your PATH to use spinx:'
+        println ''
+        println '   Unix/macOS – add to ~/.bashrc or ~/.zshrc:'
+        println "     export PATH=\"${distDir.absolutePath}:\$PATH\""
+        println ''
+        println '   Windows – add to System/User Environment Variables:'
+        println "     ${distDir.absolutePath}"
+        println '==================================================='
+    }
+}
+
 tasks.register('createNpmLib') {
     group = 'publishing'
     description = 'Creates a jar and copies it to npm/libs/spinx-lib.jar for npm publishing'

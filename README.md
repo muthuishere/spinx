@@ -43,7 +43,7 @@ Multi-cloud deployment CLI for AWS Fargate, AWS Lambda, GCP Cloud Run, and Azure
 
 ---
 
-### 2️⃣ Clone and Install Globally
+### 2️⃣ Clone and Install Locally (no admin/sudo required)
 
 ```bash
 git clone https://github.com/muthuishere/spinx.git
@@ -52,14 +52,17 @@ task local-install
 ```
 
 This will:
-- Build the JAR library 
-- Install spinx to `~/.npm-global` (no `sudo` required)
+- Build the fat JAR
+- Create a `dist/` directory containing `spinx.jar`, a Unix shell script (`spinx`), and a Windows batch file (`spinx.bat`)
 
-> **Note:** If `spinx` is not found after install, add the npm user bin directory to your PATH:
-> ```bash
-> export PATH="$HOME/.npm-global/bin:$PATH"
-> ```
-> Add that line to your `~/.bashrc`, `~/.zshrc`, or equivalent shell profile to make it permanent.
+Then add the `dist/` directory to your `PATH` once:
+
+**Unix / macOS** – add to `~/.bashrc` or `~/.zshrc`:
+```bash
+export PATH="/path/to/spinx/dist:$PATH"
+```
+
+**Windows** – add the `dist\` folder to your System/User Environment `Path` variable.
 
 Now you can run `spinx` from anywhere:
 

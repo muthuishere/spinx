@@ -19,12 +19,7 @@ tasks:
       - node npm/bin/spinx {{.CLI_ARGS}}
 
   local-install:
-    desc: Build jar library and install spinx for current user from the npm package (no sudo required)
-    deps: [create-npm-library]
-    dir: npm
+    desc: Build fat JAR and create dist/ wrapper scripts for local PATH install (no admin/sudo required)
     cmds:
-      - mkdir -p ${HOME}/.npm-global
-      - npm install -g . --prefix ${HOME}/.npm-global
-      - echo "Done! To use spinx, add the following to your shell profile (~/.bashrc or ~/.zshrc):"
-      - echo "  export PATH=\"\$HOME/.npm-global/bin:\$PATH\""
+      - ./gradlew createLocalDist
  
