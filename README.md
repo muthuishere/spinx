@@ -68,15 +68,22 @@ Download the pre-built zip from [GitHub Releases](https://github.com/muthuishere
 ```bash
 curl -LO https://github.com/muthuishere/spinx/releases/latest/download/spinx.zip
 unzip spinx.zip -d ~/.spinx
-export PATH="$HOME/.spinx:$PATH"   # add to ~/.bashrc or ~/.zshrc
+# Add to ~/.bashrc or ~/.zshrc:
+export PATH="$PATH:$HOME/.spinx"
 ```
 
-**Windows** – download `spinx.zip` from [GitHub Releases](https://github.com/muthuishere/spinx/releases), extract it to a folder (e.g. `%USERPROFILE%\.spinx`), then add that folder to your user `Path` via System Settings.
+**Windows:**
+```bat
+:: Download spinx.zip from GitHub Releases, then:
+mkdir %USERPROFILE%\.spinx
+tar -xf spinx.zip -C %USERPROFILE%\.spinx
+:: Add %USERPROFILE%\.spinx to user PATH via System Settings → Environment Variables
+```
 
-Now you can run `spinx` from anywhere:
+Open a new terminal and run:
 
 ```bash
-spinx aws-fargate deploy -c ./examples/fargateconfig.yaml
+spinx --version
 ```
 
 ---
@@ -95,36 +102,50 @@ This builds the fat JAR and creates a `dist/` directory with `spinx.jar` and wra
 
 ### 5️⃣ Manual Build and Run (without global install)
 
-Build and run directly from the cloned source — no install step, no PATH changes needed:
+Clone, build, and add the `dist/` folder to your PATH — **no admin/sudo required**.
+
+**Step 1 – Clone and build:**
 
 ```bash
 git clone https://github.com/muthuishere/spinx.git
 cd spinx
+./gradlew createLocalDist
+```
+
+This creates a `dist/` directory with three files:
+
+| File | Purpose |
+|---|---|
+| `spinx.jar` | Fat JAR (all dependencies bundled) |
+| `spinx` | Unix/macOS launcher script |
+| `spinx.bat` | Windows launcher script |
+
+The build also prints the exact PATH line to add — copy it from the terminal output.
+
+**Step 2 – Add `dist/` to your PATH:**
+
+**Unix / macOS** – add to `~/.bashrc` or `~/.zshrc`:
+```bash
+export PATH="$PATH:/path/to/spinx/dist"
+```
+
+**Windows** – open **System Settings → Environment Variables → User PATH** and add:
+```
+C:\path\to\spinx\dist
+```
+
+**Step 3 – Open a new terminal and verify:**
+```bash
+spinx --version
+```
+
+**Or skip PATH setup and run directly:**
+```bash
+# Via java -jar
 ./gradlew shadowJar
-```
-
-Then run with `java -jar`:
-
-```bash
 java -jar build/libs/spinx-<version>-all.jar <provider> <action> -c <config.yaml>
-```
 
-**Examples** (replace `<version>` with the actual version, e.g. `0.1.0`):
-
-```bash
-# AWS Fargate
-java -jar build/libs/spinx-0.1.0-all.jar aws-fargate deploy -c ./examples/fargateconfig.yaml
-
-# GCP Cloud Run
-java -jar build/libs/spinx-0.1.0-all.jar gcp-cloudrun deploy -c ./examples/cloudrunconfig.yaml
-
-# Azure Container Apps
-java -jar build/libs/spinx-0.1.0-all.jar azure-container-apps deploy -c ./examples/azurecontainerappsconfig.yaml
-```
-
-Or run directly via Gradle (no JAR build step required):
-
-```bash
+# Via Gradle
 ./gradlew run --args="aws-fargate deploy -c ./examples/fargateconfig.yaml"
 ```
 

@@ -115,6 +115,7 @@ tasks.register('createLocalDist') {
 
     doLast {
         def distDir = file('dist')
+        distDir.deleteDir()
         distDir.mkdirs()
 
         // Copy fat JAR into dist/
@@ -138,14 +139,14 @@ exec java -jar "\$(dirname "\$0")/spinx.jar" "\$@"
 
         println ''
         println '==================================================='
-        println " Spinx distribution created in: ${distDir.absolutePath}"
+        println " Spinx dist ready: ${distDir.absolutePath}"
         println '==================================================='
-        println ' Add the dist folder to your PATH to use spinx:'
+        println ' Add the following to your PATH to use spinx:'
         println ''
         println '   Unix/macOS – add to ~/.bashrc or ~/.zshrc:'
-        println "     export PATH=\"${distDir.absolutePath}:\$PATH\""
+        println "     export PATH=\"\$PATH:${distDir.absolutePath}\""
         println ''
-        println '   Windows – add to System/User Environment Variables:'
+        println '   Windows – add to user PATH via System Settings:'
         println "     ${distDir.absolutePath}"
         println '==================================================='
     }
@@ -198,9 +199,10 @@ jreleaser {
     }
     files {
         artifacts {
+            def distZipPath = tasks.named('createDistZip').get().archiveFile.get().asFile.path
             artifact { path = "build/libs/${project.name}-${project.version}-all.jar" }
             artifact { path = "build/distributions/${project.name}-${project.version}.zip" }
-            artifact { path = tasks.named('createDistZip').get().archiveFile.get().asFile.path }
+            artifact { path = distZipPath }
         }
     }
 }

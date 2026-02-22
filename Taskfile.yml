@@ -19,7 +19,7 @@ tasks:
       - node npm/bin/spinx {{.CLI_ARGS}}
 
   local-install:
-    desc: Build fat JAR and create dist/ wrapper scripts for local PATH install (no admin/sudo required)
+    desc: Build fat JAR and create dist/ with launcher scripts – then add dist/ to your PATH (no admin required)
     cmds:
       - ./gradlew createLocalDist
  

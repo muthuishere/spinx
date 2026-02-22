@@ -24,14 +24,15 @@ Download the pre-built zip from [GitHub Releases](https://github.com/muthuishere
 # Unix/macOS
 curl -LO https://github.com/muthuishere/spinx/releases/latest/download/spinx.zip
 unzip spinx.zip -d ~/.spinx
-export PATH="$HOME/.spinx:$PATH"   # add to ~/.bashrc or ~/.zshrc
+# Add to ~/.bashrc or ~/.zshrc:
+export PATH="$PATH:$HOME/.spinx"
 ```
 
 ```bat
 :: Windows – download spinx.zip from GitHub Releases, then:
 mkdir %USERPROFILE%\.spinx
 tar -xf spinx.zip -C %USERPROFILE%\.spinx
-:: Add %USERPROFILE%\.spinx to your user PATH via System Settings
+:: Add %USERPROFILE%\.spinx to user PATH via System Settings → Environment Variables
 ```
 
 ---
