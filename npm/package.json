@@ -6,6 +6,11 @@
   "bin": {
     "spinx": "bin/spinx"
   },
+  "files": [
+    "bin/",
+    "libs/",
+    "README.md"
+  ],
   "scripts": {
   },
   "author": "Muthukumaran Navaneethakrishnan",

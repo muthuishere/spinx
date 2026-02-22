@@ -4,16 +4,26 @@ This guide covers the prerequisites for using Spinx via NPM installation.
 
 ## 📦 Installation
 
+**Option A – Run with `npx` (no install needed):**
+
 ```bash
-npm install -g @muthuishere/spinx --prefix ${HOME}/.npm-global
+npx @muthuishere/spinx <provider> <action> -c <config-file>
 ```
 
-> **No sudo required!** This installs to `~/.npm-global` in your home directory.
-> Make sure `~/.npm-global/bin` is in your PATH:
+**Option B – Global install:**
+
+```bash
+npm install -g @muthuishere/spinx
+```
+
+> **Admin/sudo issue with `npm install -g`?**  
+> Configure npm to use a user-writable prefix (one-time setup, no admin needed):
 > ```bash
-> export PATH="$HOME/.npm-global/bin:$PATH"
+> npm config set prefix ~/.npm-global
+> export PATH="$HOME/.npm-global/bin:$PATH"   # add to ~/.bashrc or ~/.zshrc
+> npm install -g @muthuishere/spinx
 > ```
-> Add that line to your `~/.bashrc`, `~/.zshrc`, or equivalent shell profile.
+> On Windows, see [npm docs on resolving permission errors](https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally).
 
 ---
 
@@ -233,14 +243,16 @@ spinx aws-fargate destroy -c ./config/fargateconfig.yaml
 
 ### "Command not found: spinx"
 ```bash
-# Reinstall to user prefix (no sudo needed)
-npm install -g @muthuishere/spinx --prefix ${HOME}/.npm-global
+# Use npx to run without installing:
+npx @muthuishere/spinx --version
 
-# Check if npm user bin is in PATH
-echo $PATH | grep -q ".npm-global/bin" || echo "Add \$HOME/.npm-global/bin to your PATH"
+# Or reinstall globally:
+npm install -g @muthuishere/spinx
 
-# Check the npm user prefix
-npm config get prefix
+# If you get permission errors, configure a user-writable npm prefix:
+npm config set prefix ~/.npm-global
+export PATH="$HOME/.npm-global/bin:$PATH"
+npm install -g @muthuishere/spinx
 ```
 
 ### Docker Build Failures

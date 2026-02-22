@@ -43,7 +43,35 @@ Multi-cloud deployment CLI for AWS Fargate, AWS Lambda, GCP Cloud Run, and Azure
 
 ---
 
-### 2️⃣ Clone and Install Locally (no admin/sudo required)
+### 2️⃣ Install via npm (Recommended)
+
+**Option A – Run with `npx` (no install needed):**
+
+```bash
+npx @muthuishere/spinx aws-fargate deploy -c ./examples/fargateconfig.yaml
+```
+
+**Option B – Global install:**
+
+```bash
+npm install -g @muthuishere/spinx
+spinx aws-fargate deploy -c ./examples/fargateconfig.yaml
+```
+
+> **Admin/sudo issue with `npm install -g`?**  
+> Configure npm to use a user-writable prefix (one-time setup):
+> ```bash
+> # Unix/macOS
+> npm config set prefix ~/.npm-global
+> export PATH="$HOME/.npm-global/bin:$PATH"   # add to ~/.bashrc or ~/.zshrc
+> npm install -g @muthuishere/spinx
+> ```
+> On Windows, see [npm docs on changing the global prefix](https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally).
+> Or use the `dist/` approach below — no npm required at all.
+
+---
+
+### 3️⃣ Clone and Install Locally (no npm, no admin required)
 
 ```bash
 git clone https://github.com/muthuishere/spinx.git
@@ -72,7 +100,7 @@ spinx aws-fargate deploy -c ./examples/fargateconfig.yaml
 
 ---
 
-### 3️⃣ Manual Build and Run (without global install)
+### 4️⃣ Manual Build and Run (without any install)
 
 ```bash
 ./gradlew shadowJar
