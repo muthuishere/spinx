@@ -2,7 +2,11 @@ package tools.muthuishere.spinx.kamal;
 
 import tools.muthuishere.spinx.SpinxBaseConfig;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Configuration for Kamal deployments (VPS / any server via SSH).
@@ -18,6 +22,27 @@ import java.util.List;
  *   - "192.168.1.1"
  * registry:
  *   username: "myuser"
+ * secrets:
+ *   - SECRET_KEY_BASE
+ *   - DATABASE_PASSWORD
+ * accessories:
+ *   db:
+ *     image: "mysql:8.0"
+ *     host: "192.168.1.1"
+ *     port: 3306
+ *     env:
+ *       secret:
+ *         - MYSQL_ROOT_PASSWORD
+ *       clear:
+ *         MYSQL_DATABASE: myapp
+ *     volumes:
+ *       - "/var/lib/mysql:/var/lib/mysql"
+ *   redis:
+ *     image: "redis:7.0"
+ *     host: "192.168.1.1"
+ *     port: 6379
+ *     volumes:
+ *       - "/var/lib/redis:/data"
  * </pre>
  */
 public class KamalConfig extends SpinxBaseConfig {
@@ -36,6 +61,21 @@ public class KamalConfig extends SpinxBaseConfig {
 
     /** SSH user on the target servers (default: root). */
     private String sshUser = "root";
+
+    /**
+     * Names of environment variables whose values are secrets and should NOT
+     * be committed to the deploy.yml in plain text.  Kamal will read them
+     * from the environment at deploy time.
+     *
+     * <p>Example: {@code [SECRET_KEY_BASE, DATABASE_PASSWORD]}
+     */
+    private List<String> secrets;
+
+    /**
+     * Named accessory services (e.g. databases, caches) that Kamal manages
+     * alongside the main app container.  Keys are the accessory names.
+     */
+    private Map<String, AccessoryConfig> accessories;
 
     // -----------------------------------------------------------------------
     // Nested: RegistryConfig
@@ -68,6 +108,61 @@ public class KamalConfig extends SpinxBaseConfig {
     }
 
     // -----------------------------------------------------------------------
+    // Nested: AccessoryConfig
+    // -----------------------------------------------------------------------
+
+    /**
+     * Configuration for a single Kamal accessory (e.g. a MySQL or Redis
+     * sidecar service managed by Kamal on the same or a different server).
+     */
+    public static class AccessoryConfig {
+        /** Docker image for this accessory, e.g. "mysql:8.0". */
+        private String image;
+
+        /** Host (IP or hostname) on which to run this accessory. */
+        private String host;
+
+        /** Host port to expose. */
+        private Integer port;
+
+        /**
+         * Secret environment variable names whose values come from the
+         * deploy-time environment (not stored in the config file).
+         */
+        private List<String> secrets;
+
+        /** Plain-text environment variables for this accessory. */
+        private Map<String, String> env;
+
+        /** Volume mount specs, e.g. "/var/lib/mysql:/var/lib/mysql". */
+        private List<String> volumes;
+
+        public String getImage() { return image; }
+        public void setImage(String image) { this.image = image; }
+
+        public String getHost() { return host; }
+        public void setHost(String host) { this.host = host; }
+
+        public Integer getPort() { return port; }
+        public void setPort(Integer port) { this.port = port; }
+
+        public List<String> getSecrets() { return secrets; }
+        public void setSecrets(List<String> secrets) {
+            this.secrets = secrets != null ? secrets : new ArrayList<>();
+        }
+
+        public Map<String, String> getEnv() { return env; }
+        public void setEnv(Map<String, String> env) {
+            this.env = env != null ? env : new HashMap<>();
+        }
+
+        public List<String> getVolumes() { return volumes; }
+        public void setVolumes(List<String> volumes) {
+            this.volumes = volumes != null ? volumes : new ArrayList<>();
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Getters & Setters
     // -----------------------------------------------------------------------
 
@@ -88,6 +183,16 @@ public class KamalConfig extends SpinxBaseConfig {
     public String getSshUser() { return sshUser; }
     public void setSshUser(String sshUser) { this.sshUser = sshUser; }
 
+    public List<String> getSecrets() { return secrets; }
+    public void setSecrets(List<String> secrets) {
+        this.secrets = secrets != null ? secrets : new ArrayList<>();
+    }
+
+    public Map<String, AccessoryConfig> getAccessories() { return accessories; }
+    public void setAccessories(Map<String, AccessoryConfig> accessories) {
+        this.accessories = accessories != null ? accessories : new LinkedHashMap<>();
+    }
+
     @Override
     public String toString() {
         return "KamalConfig{" +
@@ -98,6 +203,9 @@ public class KamalConfig extends SpinxBaseConfig {
                 ", environmentFile='" + getEnvironmentFile() + '\'' +
                 ", containerPort=" + getContainerPort() +
                 ", sshUser='" + sshUser + '\'' +
+                ", secrets=" + secrets +
+                ", accessories=" + accessories.keySet() +
                 '}';
     }
 }
+

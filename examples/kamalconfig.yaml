@@ -20,6 +20,32 @@ registry:
 # SSH user on the target servers (default: root)
 sshUser: "root"
 
-# Optional inline environment variables (merged with .env file)
+# Secret environment variable names – values come from the deploy-time environment
+# and are NEVER written to this file.
+secrets:
+  - SECRET_KEY_BASE
+  - DATABASE_PASSWORD
+
+# Optional inline environment variables (merged with .env file; visible in deploy.yml)
 # environmentVariables:
 #   APP_ENV: "production"
+
+# Accessory services managed by Kamal alongside the main app container
+accessories:
+  db:
+    image: "mysql:8.0"
+    host: "192.168.1.1"
+    port: 3306
+    secrets:
+      - MYSQL_ROOT_PASSWORD
+    env:
+      MYSQL_DATABASE: "myapp"
+    volumes:
+      - "/var/lib/mysql:/var/lib/mysql"
+
+  redis:
+    image: "redis:7.0"
+    host: "192.168.1.1"
+    port: 6379
+    volumes:
+      - "/var/lib/redis:/data"

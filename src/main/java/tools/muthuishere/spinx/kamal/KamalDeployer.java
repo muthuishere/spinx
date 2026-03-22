@@ -24,13 +24,43 @@ import java.util.Map;
  * <ol>
  *   <li>Load {@code KamalConfig} from the provided YAML file.</li>
  *   <li>Generate a {@code deploy.yml} in the working directory.</li>
- *   <li>Delegate to {@code kamal} CLI commands.</li>
+ *   <li>Delegate to {@code kamal} CLI commands via the {@link CommandInvoker}.</li>
  * </ol>
+ *
+ * <p>The {@link CommandInvoker} is injectable so that tests can capture the
+ * exact commands that would be sent without spawning OS processes.
  */
 public class KamalDeployer implements CloudDeployer {
 
     private KamalConfig config;
     private String configFilename;
+    private final CommandInvoker commandInvoker;
+
+    /** Production constructor – delegates to {@link Runner#runCommand(String)}. */
+    public KamalDeployer() {
+        this(Runner::runCommand);
+    }
+
+    /**
+     * Test-friendly constructor that accepts a custom {@link CommandInvoker}.
+     *
+     * @param commandInvoker strategy used to execute kamal CLI commands
+     */
+    public KamalDeployer(CommandInvoker commandInvoker) {
+        this.commandInvoker = commandInvoker;
+    }
+
+    /**
+     * Constructor that accepts both a custom invoker and a pre-built config,
+     * bypassing file loading entirely (useful for unit tests).
+     *
+     * @param commandInvoker strategy used to execute kamal CLI commands
+     * @param config         pre-built Kamal configuration
+     */
+    public KamalDeployer(CommandInvoker commandInvoker, KamalConfig config) {
+        this.commandInvoker = commandInvoker;
+        this.config = config;
+    }
 
     // -----------------------------------------------------------------------
     // CloudDeployer – lifecycle
@@ -80,26 +110,26 @@ public class KamalDeployer implements CloudDeployer {
     public void setup() {
         System.out.println("🚀 Kamal: Running setup...");
         generateKamalDeployYml();
-        Runner.runCommand("kamal setup");
+        commandInvoker.invoke("kamal setup");
     }
 
     @Override
     public void deploy() {
         System.out.println("🚀 Kamal: Deploying...");
         generateKamalDeployYml();
-        Runner.runCommand("kamal deploy");
+        commandInvoker.invoke("kamal deploy");
     }
 
     @Override
     public void destroy() {
         System.out.println("🗑️  Kamal: Removing deployment...");
-        Runner.runCommand("kamal remove");
+        commandInvoker.invoke("kamal remove");
     }
 
     @Override
     public void showLogs() {
         System.out.println("📋 Kamal: Streaming logs...");
-        Runner.runCommand("kamal logs");
+        commandInvoker.invoke("kamal logs");
     }
 
     // -----------------------------------------------------------------------
@@ -160,13 +190,11 @@ public class KamalDeployer implements CloudDeployer {
         ssh.put("user", config.getSshUser());
         deploy.put("ssh", ssh);
 
-        // Environment variables
-        Map<String, String> envVars = config.getEnvironmentVariables();
-        if (envVars != null && !envVars.isEmpty()) {
-            Map<String, Object> env = new LinkedHashMap<>();
-            env.put("clear", new LinkedHashMap<>(envVars));
-            deploy.put("env", env);
-        }
+        // Environment variables (clear + secrets)
+        buildEnvSection(deploy, config.getEnvironmentVariables(), config.getSecrets());
+
+        // Accessories (databases, caches, etc.)
+        buildAccessoriesSection(deploy, config.getAccessories());
 
         // Write the deploy.yml
         Path deployYmlPath = Paths.get(System.getProperty("user.dir"), "deploy.yml");
@@ -180,4 +208,62 @@ public class KamalDeployer implements CloudDeployer {
             throw new RuntimeException("Failed to write deploy.yml", e);
         }
     }
+
+    /**
+     * Builds the {@code env} section of deploy.yml, separating plain-text
+     * variables ({@code clear}) from secret references ({@code secret}).
+     */
+    private void buildEnvSection(Map<String, Object> deploy,
+                                  Map<String, String> envVars,
+                                  List<String> secrets) {
+        boolean hasEnv = envVars != null && !envVars.isEmpty();
+        boolean hasSecrets = secrets != null && !secrets.isEmpty();
+        if (!hasEnv && !hasSecrets) return;
+
+        Map<String, Object> env = new LinkedHashMap<>();
+        if (hasSecrets) {
+            env.put("secret", new ArrayList<>(secrets));
+        }
+        if (hasEnv) {
+            env.put("clear", new LinkedHashMap<>(envVars));
+        }
+        deploy.put("env", env);
+    }
+
+    /**
+     * Builds the {@code accessories} section of deploy.yml from
+     * {@link KamalConfig.AccessoryConfig} entries.
+     */
+    private void buildAccessoriesSection(Map<String, Object> deploy,
+                                          Map<String, KamalConfig.AccessoryConfig> accessories) {
+        if (accessories == null || accessories.isEmpty()) return;
+
+        Map<String, Object> accessoriesMap = new LinkedHashMap<>();
+        for (Map.Entry<String, KamalConfig.AccessoryConfig> entry : accessories.entrySet()) {
+            KamalConfig.AccessoryConfig acc = entry.getValue();
+            Map<String, Object> accMap = new LinkedHashMap<>();
+
+            if (acc.getImage() != null) accMap.put("image", acc.getImage());
+            if (acc.getHost() != null) accMap.put("host", acc.getHost());
+            if (acc.getPort() != null) accMap.put("port", acc.getPort());
+
+            // Accessory env (secrets + clear)
+            boolean hasAccSecrets = acc.getSecrets() != null && !acc.getSecrets().isEmpty();
+            boolean hasAccEnv = acc.getEnv() != null && !acc.getEnv().isEmpty();
+            if (hasAccSecrets || hasAccEnv) {
+                Map<String, Object> accEnv = new LinkedHashMap<>();
+                if (hasAccSecrets) accEnv.put("secret", new ArrayList<>(acc.getSecrets()));
+                if (hasAccEnv) accEnv.put("clear", new LinkedHashMap<>(acc.getEnv()));
+                accMap.put("env", accEnv);
+            }
+
+            if (acc.getVolumes() != null && !acc.getVolumes().isEmpty()) {
+                accMap.put("volumes", new ArrayList<>(acc.getVolumes()));
+            }
+
+            accessoriesMap.put(entry.getKey(), accMap);
+        }
+        deploy.put("accessories", accessoriesMap);
+    }
 }
+
