@@ -274,4 +274,72 @@ public class EnvironmentParser {
     public static EnvironmentResult parseYamlEnvironmentVariables(Map<String, String> yamlEnvironmentVariables) {
         return parseEnvironmentVariables(yamlEnvironmentVariables, null, null);
     }
+
+    /**
+     * Load secrets from a secrets file (e.g. {@code .env.secrets}, {@code .env.secrets.dev}).
+     *
+     * <p><strong>Security contract:</strong> The <em>values</em> of loaded secrets are
+     * <strong>never</strong> printed, logged, or exposed in any diagnostic output.
+     * Only the key names and the total count are surfaced for operational visibility.
+     *
+     * @param secretsFilePath  path to the secrets file (relative or absolute)
+     * @param configFileDirectory  base directory for resolving a relative path
+     * @return map of secret key → value, or an empty map if the file is absent/unreadable
+     */
+    public static Map<String, String> loadSecretsFile(String secretsFilePath, String configFileDirectory) {
+        if (secretsFilePath == null || secretsFilePath.trim().isEmpty()) {
+            return new HashMap<>();
+        }
+
+        String resolvedPath = resolveEnvironmentFilePath(secretsFilePath, configFileDirectory);
+        if (resolvedPath == null) {
+            return new HashMap<>();
+        }
+
+        java.io.File secretsFile = new java.io.File(resolvedPath);
+        if (!secretsFile.exists()) {
+            System.out.println("🔒 Secrets file not found: " + resolvedPath + " (skipping)");
+            return new HashMap<>();
+        }
+        if (!secretsFile.canRead()) {
+            System.err.println("❌ Cannot read secrets file: " + resolvedPath);
+            return new HashMap<>();
+        }
+
+        Map<String, String> secrets = new HashMap<>();
+        try (java.io.BufferedReader reader = java.nio.file.Files.newBufferedReader(secretsFile.toPath())) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty() || line.startsWith("#")) {
+                    continue;
+                }
+                int eq = line.indexOf('=');
+                if (eq > 0) {
+                    String key = line.substring(0, eq).trim();
+                    String value = line.substring(eq + 1).trim();
+                    // Strip surrounding quotes if present; each branch checks BOTH start AND end
+                    // for the same quote character, so mismatched quotes (e.g. "value') are left as-is.
+                    if (value.length() >= 2
+                            && ((value.startsWith("\"") && value.endsWith("\""))
+                                || (value.startsWith("'") && value.endsWith("'")))) {
+                        value = value.substring(1, value.length() - 1);
+                    }
+                    if (!key.isEmpty()) {
+                        secrets.put(key, value);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("❌ Failed to load secrets file '" + resolvedPath + "': " + e.getMessage());
+            return new HashMap<>();
+        }
+
+        // Log ONLY key names and count — never log values
+        System.out.println("🔒 Loaded " + secrets.size() + " secret(s) from: " + resolvedPath);
+        if (!secrets.isEmpty()) {
+            System.out.println("   🔑 Secret keys: " + String.join(", ", secrets.keySet()));
+        }
+        return secrets;
+    }
 }

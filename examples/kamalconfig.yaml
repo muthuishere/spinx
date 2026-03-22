@@ -7,6 +7,17 @@ dockerfilePath: "Dockerfile"
 environmentFile: ".env"
 containerPort: 80
 
+# Path to a secrets file whose values are NEVER logged or committed.
+# File format is identical to .env  (KEY=value, one per line, # for comments).
+# Use environment-specific names, e.g. .env.secrets.dev / .env.secrets.prod.
+# Add this file to your .gitignore!
+#
+# Keys declared here are automatically added to the `secrets:` section in
+# deploy.yml.  The actual values are injected into the kamal subprocess
+# environment at deploy time so Kamal can pass them to the containers.
+#
+# secretsFile: ".env.secrets.prod"
+
 # One or more SSH-reachable servers
 servers:
   - "192.168.1.1"
@@ -21,7 +32,8 @@ registry:
 sshUser: "root"
 
 # Secret environment variable names – values come from the deploy-time environment
-# and are NEVER written to this file.
+# (or from `secretsFile` above) and are NEVER written to this file or deploy.yml
+# as plain text.
 secrets:
   - SECRET_KEY_BASE
   - DATABASE_PASSWORD

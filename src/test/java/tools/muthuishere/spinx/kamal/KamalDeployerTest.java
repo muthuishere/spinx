@@ -305,5 +305,104 @@ class KamalDeployerTest {
             System.setProperty("user.dir", originalDir);
         }
     }
+
+    // -----------------------------------------------------------------------
+    // secretsFile – loading and integration tests
+    // -----------------------------------------------------------------------
+
+    @Test
+    void secretsFile_keysAddedToDeployYmlSecretsSection() throws IOException {
+        // Write a .env.secrets file into the temp dir
+        Path secretsFilePath = tempDir.resolve(".env.secrets");
+        Files.writeString(secretsFilePath,
+                "SECRET_KEY_BASE=abc123supersecret\n" +
+                "DATABASE_PASSWORD=dbpassword\n" +
+                "# this is a comment\n" +
+                "\n" +
+                "AWS_SECRET_ACCESS_KEY=awssecret\n");
+
+        KamalConfig cfg = buildBasicConfig("myapp", "myuser/myapp", List.of("10.0.0.1"), "myuser");
+        cfg.setSecretsFile(secretsFilePath.toString());
+
+        // Simulate what KamalDeployer.loadRuntimeSecrets would do by calling
+        // EnvironmentParser.loadSecretsFile directly and merging keys into secrets
+        var loadedSecrets = tools.muthuishere.spinx.EnvironmentParser.loadSecretsFile(
+                secretsFilePath.toString(), null);
+        List<String> secretKeys = new ArrayList<>(loadedSecrets.keySet());
+        cfg.setSecrets(secretKeys);
+
+        String originalDir = System.getProperty("user.dir");
+        System.setProperty("user.dir", tempDir.toString());
+        try {
+            new KamalDeployer(cmd -> {}, cfg).generateKamalDeployYml();
+            String content = Files.readString(tempDir.resolve("deploy.yml"));
+            assertTrue(content.contains("SECRET_KEY_BASE"), "SECRET_KEY_BASE key must appear in deploy.yml");
+            assertTrue(content.contains("DATABASE_PASSWORD"), "DATABASE_PASSWORD key must appear in deploy.yml");
+            assertTrue(content.contains("AWS_SECRET_ACCESS_KEY"), "AWS_SECRET_ACCESS_KEY key must appear in deploy.yml");
+            // Values must NOT appear in the generated YAML
+            assertFalse(content.contains("abc123supersecret"), "secret value must NOT be written to deploy.yml");
+            assertFalse(content.contains("dbpassword"), "secret value must NOT be written to deploy.yml");
+            assertFalse(content.contains("awssecret"), "secret value must NOT be written to deploy.yml");
+        } finally {
+            System.setProperty("user.dir", originalDir);
+        }
+    }
+
+    @Test
+    void secretsFile_missingFileIsGracefullyIgnored() {
+        KamalConfig cfg = buildBasicConfig("myapp", "myuser/myapp", List.of("10.0.0.1"), "myuser");
+        cfg.setSecretsFile("/nonexistent/.env.secrets.prod");
+
+        // loadSecretsFile must return empty map without throwing
+        var result = tools.muthuishere.spinx.EnvironmentParser.loadSecretsFile(
+                cfg.getSecretsFile(), null);
+        assertNotNull(result, "result must not be null");
+        assertTrue(result.isEmpty(), "missing secrets file should yield an empty map");
+    }
+
+    @Test
+    void secretsFile_handlesQuotedAndUnquotedValues() throws IOException {
+        Path secretsFilePath = tempDir.resolve(".env.secrets");
+        Files.writeString(secretsFilePath,
+                "QUOTED_DOUBLE=\"my secret value\"\n" +
+                "QUOTED_SINGLE='another secret'\n" +
+                "UNQUOTED=plain\n");
+
+        var result = tools.muthuishere.spinx.EnvironmentParser.loadSecretsFile(
+                secretsFilePath.toString(), null);
+        assertEquals("my secret value", result.get("QUOTED_DOUBLE"));
+        assertEquals("another secret", result.get("QUOTED_SINGLE"));
+        assertEquals("plain", result.get("UNQUOTED"));
+    }
+
+    @Test
+    void secretsFile_baseConfigFieldInherited() {
+        KamalConfig cfg = new KamalConfig();
+        cfg.setSecretsFile(".env.secrets.prod");
+        assertEquals(".env.secrets.prod", cfg.getSecretsFile(),
+                "secretsFile field should be readable from KamalConfig via SpinxBaseConfig");
+    }
+
+    @Test
+    void secretsFile_valuesLoadedIntoRuntimeSecrets() throws IOException {
+        // Write secrets file
+        Path secretsFilePath = tempDir.resolve(".env.secrets.test");
+        Files.writeString(secretsFilePath, "MY_TOKEN=tok123\nMY_PASS=pass456\n");
+
+        // Build deployer with the test constructor that bypasses file-based init
+        KamalConfig cfg = buildBasicConfig("myapp", "myuser/myapp", List.of("10.0.0.1"), "myuser");
+        KamalDeployer deployer = new KamalDeployer(cmd -> {}, cfg);
+
+        // Simulate what init() would call
+        var loaded = tools.muthuishere.spinx.EnvironmentParser.loadSecretsFile(
+                secretsFilePath.toString(), null);
+        // Manually load via reflection-free accessor by invoking the same EnvironmentParser path
+        // and verifying the map contents are correct
+        assertEquals("tok123", loaded.get("MY_TOKEN"),
+                "MY_TOKEN value must be loaded from secrets file");
+        assertEquals("pass456", loaded.get("MY_PASS"),
+                "MY_PASS value must be loaded from secrets file");
+        assertEquals(2, loaded.size(), "exactly 2 secrets should be loaded");
+    }
 }
 

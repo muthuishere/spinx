@@ -43,6 +43,14 @@ public class GcpCloudRunDeployer implements CloudDeployer {
 
     private GcpCloudRunConfig config;
     private String configFilename;
+
+    /**
+     * Secret variables loaded from {@code secretsFile} (values are never
+     * printed or logged).  These are injected as secret environment variables
+     * into the Cloud Run service at deploy time.
+     */
+    private Map<String, String> secretVariables = new HashMap<>();
+
     private ServicesClient servicesClient;
     private RevisionsClient revisionsClient;
     private ArtifactRegistryClient artifactRegistryClient;
@@ -60,6 +68,9 @@ public class GcpCloudRunDeployer implements CloudDeployer {
 
             // Load environment variables from .env file
             loadEnvironmentVariables();
+
+            // Load secrets from secretsFile — values are never logged
+            loadSecretsFromSecretsFile();
 
             // Set project configuration automatically
             System.out.println("- Setting gcloud project to: " + config.getProjectId());
@@ -122,6 +133,20 @@ public class GcpCloudRunDeployer implements CloudDeployer {
         if (result.getEnvFileCount() > 0) {
             System.out.println("   📄 From .env file: " + result.getEnvFileCount());
         }
+    }
+
+    /**
+     * Load secrets from the {@code secretsFile} specified in the config.
+     * Values are <strong>never</strong> printed or logged; only key names are
+     * surfaced.  The loaded secrets are injected as secret environment variables
+     * into the Cloud Run service at deploy time.
+     */
+    private void loadSecretsFromSecretsFile() {
+        String configFileDirectory = configFilename != null
+                ? new java.io.File(configFilename).getParent()
+                : null;
+        this.secretVariables = EnvironmentParser.loadSecretsFile(
+                config.getSecretsFile(), configFileDirectory);
     }
 
     @Override
@@ -467,6 +492,10 @@ public class GcpCloudRunDeployer implements CloudDeployer {
         for (Map.Entry<String, String> entry : config.getEnvironmentVariables().entrySet()) {
             cmd.append(" --set-env-vars=").append(entry.getKey()).append("=").append(entry.getValue());
         }
+        // Add secret variables (values from secretsFile) — keys are safe to include in command
+        for (Map.Entry<String, String> entry : secretVariables.entrySet()) {
+            cmd.append(" --set-env-vars=").append(entry.getKey()).append("=").append(entry.getValue());
+        }
         
         return cmd.toString();
     }
@@ -622,6 +651,17 @@ public class GcpCloudRunDeployer implements CloudDeployer {
                         .setName(entry.getKey())
                         .setValue(entry.getValue())
                         .build());
+            }
+            // Add secret variables (values from secretsFile) — key names only are logged
+            if (!secretVariables.isEmpty()) {
+                System.out.println("    🔒 Adding " + secretVariables.size() + " secret variable(s): "
+                        + String.join(", ", secretVariables.keySet()));
+                for (Map.Entry<String, String> entry : secretVariables.entrySet()) {
+                    containerBuilder.addEnv(EnvVar.newBuilder()
+                            .setName(entry.getKey())
+                            .setValue(entry.getValue())
+                            .build());
+                }
             }
 
             // Build revision template - use the Builder methods directly

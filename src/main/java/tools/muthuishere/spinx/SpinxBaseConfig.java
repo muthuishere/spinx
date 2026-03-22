@@ -21,6 +21,28 @@ public class SpinxBaseConfig {
     private int containerPort = 8080;
     private Map<String, String> environmentVariables = new HashMap<>();
 
+    /**
+     * Path to a secrets file (relative or absolute) whose key=value pairs are
+     * treated as sensitive secrets.  Values are <strong>never</strong> printed
+     * or logged anywhere; only key names are emitted for diagnostic purposes.
+     *
+     * <p>Naming convention: {@code .env.secrets}, {@code .env.secrets.dev},
+     * {@code .env.secrets.prod}, etc.  Add the file to {@code .gitignore} to
+     * prevent it from being committed.
+     *
+     * <p>Behaviour per provider:
+     * <ul>
+     *   <li><b>Kamal</b> – key names are added to the {@code secrets:} section
+     *       of {@code deploy.yml}; values are injected as environment variables
+     *       into the kamal subprocess so Kamal can pass them through to the
+     *       containers.</li>
+     *   <li><b>AWS Fargate / GCP Cloud Run / Azure Container Apps</b> – values
+     *       are treated as secret environment variables for the container (never
+     *       written to any generated config file in plain text).</li>
+     * </ul>
+     */
+    private String secretsFile;
+
     // Getters and Setters
     public String getServiceName() { return serviceName; }
     public void setServiceName(String serviceName) { this.serviceName = serviceName; }
@@ -38,4 +60,7 @@ public class SpinxBaseConfig {
     public void setEnvironmentVariables(Map<String, String> environmentVariables) {
         this.environmentVariables = environmentVariables != null ? environmentVariables : new HashMap<>();
     }
+
+    public String getSecretsFile() { return secretsFile; }
+    public void setSecretsFile(String secretsFile) { this.secretsFile = secretsFile; }
 }

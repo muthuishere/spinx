@@ -36,9 +36,21 @@ public class KamalDeployer implements CloudDeployer {
     private String configFilename;
     private final CommandInvoker commandInvoker;
 
-    /** Production constructor – delegates to {@link Runner#runCommand(String)}. */
+    /**
+     * Runtime secrets loaded from {@code secretsFile} (values are never logged).
+     * These are injected as environment variables into the kamal subprocess so
+     * Kamal can pass them through SSH to the containers.
+     *
+     * <p>The field is populated by {@link #loadRuntimeSecrets} during {@link #init}.
+     * The production {@link CommandInvoker} lambda captures {@code this}, so it
+     * always sees the fully-populated map at invocation time (i.e. after init
+     * completes), not the empty map at construction time.
+     */
+    private Map<String, String> runtimeSecrets = new java.util.HashMap<>();
+
+    /** Production constructor – delegates to {@link Runner#runCommandWithEnv(String, Map)}. */
     public KamalDeployer() {
-        this(Runner::runCommand);
+        this.commandInvoker = command -> Runner.runCommandWithEnv(command, runtimeSecrets);
     }
 
     /**
@@ -95,11 +107,18 @@ public class KamalDeployer implements CloudDeployer {
                 config.setEnvironmentFile(
                         Paths.get(configDir, config.getEnvironmentFile()).normalize().toString());
             }
+            if (config.getSecretsFile() != null && !Paths.get(config.getSecretsFile()).isAbsolute()) {
+                config.setSecretsFile(
+                        Paths.get(configDir, config.getSecretsFile()).normalize().toString());
+            }
 
             System.out.println("Loaded config: " + config);
 
-            // Parse and merge environment variables
+            // Parse and merge regular environment variables
             loadEnvironmentVariables(configDir);
+
+            // Load secrets from secretsFile — values are never logged
+            loadRuntimeSecrets(configDir);
 
         } catch (Exception e) {
             throw new RuntimeException("Failed to initialize Kamal deployer", e);
@@ -146,6 +165,47 @@ public class KamalDeployer implements CloudDeployer {
         System.out.println("📊 Environment parsing complete:");
         System.out.println("   📝 Source: " + result.getSource());
         System.out.println("   📊 Total variables: " + result.getTotalCount());
+    }
+
+    /**
+     * Load secrets from the {@code secretsFile} into {@link #runtimeSecrets}.
+     * Values are <strong>never</strong> logged; only key names are surfaced.
+     * The secret key names are also merged into {@code config.secrets} so that
+     * they appear in the {@code secrets:} section of the generated
+     * {@code deploy.yml}.
+     */
+    private void loadRuntimeSecrets(String configDir) {
+        String secretsFilePath = config.getSecretsFile();
+        if (secretsFilePath == null || secretsFilePath.trim().isEmpty()) {
+            return;
+        }
+
+        Map<String, String> fileSecrets = EnvironmentParser.loadSecretsFile(secretsFilePath, configDir);
+        if (fileSecrets.isEmpty()) {
+            return;
+        }
+
+        // Store values for subprocess injection (never logged)
+        runtimeSecrets.putAll(fileSecrets);
+
+        // Add key names to the config.secrets list so they appear in deploy.yml
+        List<String> secretKeys = config.getSecrets() != null
+                ? new ArrayList<>(config.getSecrets())
+                : new ArrayList<>();
+        for (String key : fileSecrets.keySet()) {
+            if (!secretKeys.contains(key)) {
+                secretKeys.add(key);
+            }
+        }
+        config.setSecrets(secretKeys);
+    }
+
+    /**
+     * Package-private accessor for tests to verify that runtime secrets were
+     * loaded from the {@code secretsFile}.  Returns a copy to prevent mutation.
+     */
+    Map<String, String> getRuntimeSecrets() {
+        return new java.util.HashMap<>(runtimeSecrets);
     }
 
     /**
