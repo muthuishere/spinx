@@ -1,7 +1,7 @@
 
 # Spinx  
 **Deploy once. Run anywhere.**  
-Multi-cloud deployment CLI for AWS Fargate, AWS Lambda, GCP Cloud Run, and Azure Container Apps — all with a single command.
+Multi-cloud deployment CLI for AWS Fargate, GCP Cloud Run, Azure Container Apps, and VPS via Kamal — all with a single command.
 
 > “Spinx is to container infrastructure what `kamal` is to vps — a simple, unified interface that helps your to setup ,deploy , view logs and terminate your apps across cloud environments.”
 
@@ -9,8 +9,8 @@ Multi-cloud deployment CLI for AWS Fargate, AWS Lambda, GCP Cloud Run, and Azure
 
 ## ✨ Features
 
-- 🟢 Unified syntax across AWS, Azure, and GCP  
-- ⚙️ YAML-based configuration (simple and declarative)  
+- 🟢 Unified syntax across AWS, Azure, GCP, and any VPS via Kamal  
+- ⚙️ YAML-based configuration (simple and declarative) — uniform base fields across all providers  
 - 🔐 Environment file support (`.env`)  
 - 🧱 Handles setup, deploy, destroy, and logs  
 - 🧩 Works on Java 21+  
@@ -89,6 +89,7 @@ spinx <provider> <action> -c <config-file>
 | `aws-fargate`          | Deploy containers to AWS Fargate          |
 | `gcp-cloudrun`         | Deploy Docker images to Google Cloud Run  |
 | `azure-container-apps` | Deploy containers to Azure Container Apps |
+| `kamal`                | Deploy to any VPS / server via Kamal      |
 
 | Action    | Description                            |
 | --------- | -------------------------------------- |
@@ -174,6 +175,33 @@ Run:
 
 ```bash
 spinx azure-container-apps deploy -c ./examples/azurecontainerappsconfig.yaml
+```
+
+---
+
+### Kamal (VPS / any server) – `examples/kamalconfig.yaml`
+
+```yaml
+serviceName: "myapp"
+image: "myuser/myapp"
+dockerfilePath: "Dockerfile"
+environmentFile: ".env"
+containerPort: 80
+servers:
+  - "192.168.1.1"
+registry:
+  username: "myuser"
+  passwordEnvVar: "KAMAL_REGISTRY_PASSWORD"
+sshUser: "root"
+```
+
+> **Prerequisites:** Install [Kamal](https://kamal-deploy.org) on the machine running Spinx (`gem install kamal`), and ensure SSH access to all listed servers.  
+> Set `KAMAL_REGISTRY_PASSWORD` in your environment (or `.env` file) before running.
+
+Run:
+
+```bash
+spinx kamal deploy -c ./examples/kamalconfig.yaml
 ```
 
 ---

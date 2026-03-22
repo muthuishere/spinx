@@ -1,0 +1,11 @@
+region: "us-east-1"
+serviceName: "todo-mcp-server"
+dockerfilePath: "../Dockerfile"
+environmentFile: "../.env"
+containerPort: 8080
+cpu: 512
+memory: 1024
+desiredCount: 1
+healthCheckPath: "/api/health"
+healthCheckIntervalSeconds: 30
+deploymentTimeoutMinutes: 10

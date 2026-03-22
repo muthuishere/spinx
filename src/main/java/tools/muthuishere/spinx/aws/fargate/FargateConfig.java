@@ -1,18 +1,12 @@
 package tools.muthuishere.spinx.aws.fargate;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import tools.muthuishere.spinx.SpinxBaseConfig;
 
-public class FargateConfig {
+public class FargateConfig extends SpinxBaseConfig {
     
-    // Basic Configuration
+    // AWS-specific Configuration
     private String region;
-    private String serviceName;
-    
-    // Container Configuration
-    private String dockerfilePath;
-    private String environmentFile;
-    private int containerPort;
-    private java.util.Map<String, String> environmentVariables = new java.util.HashMap<>();
     
     // Resource Configuration
     private int cpu;
@@ -32,57 +26,57 @@ public class FargateConfig {
     // Computed getters for derived names
     @JsonIgnore
     public String getClusterName() {
-        return serviceName + "-cluster";
+        return getServiceName() + "-cluster";
     }
     
     @JsonIgnore
     public String getEcsServiceName() {
-        return serviceName + "-service";
+        return getServiceName() + "-service";
     }
     
     @JsonIgnore
     public String getTaskDefinitionFamily() {
-        return serviceName + "-task";
+        return getServiceName() + "-task";
     }
     
     @JsonIgnore
     public String getEcrRepository() {
-        return serviceName.toLowerCase().replace("_", "-");
+        return getServiceName().toLowerCase().replace("_", "-");
     }
     
     @JsonIgnore
     public String getLoadBalancerName() {
-        return serviceName + "-alb";
+        return getServiceName() + "-alb";
     }
     
     @JsonIgnore
     public String getTargetGroupName() {
-        return serviceName + "-tg";
+        return getServiceName() + "-tg";
     }
     
     @JsonIgnore
     public String getExecutionRoleName() {
-        return serviceName + "-execution-role";
+        return getServiceName() + "-execution-role";
     }
     
     @JsonIgnore
     public String getTaskRoleName() {
-        return serviceName + "-task-role";
+        return getServiceName() + "-task-role";
     }
     
     @JsonIgnore
     public String getLogGroupName() {
-        return "/ecs/" + serviceName;
+        return "/ecs/" + getServiceName();
     }
     
     @JsonIgnore
     public String getSecurityGroupName() {
-        return serviceName + "-sg";
+        return getServiceName() + "-sg";
     }
     
     @JsonIgnore
     public String getLoadBalancerSecurityGroupName() {
-        return serviceName + "-alb-sg";
+        return getServiceName() + "-alb-sg";
     }
     
     // Getters and Setters
@@ -92,46 +86,6 @@ public class FargateConfig {
     
     public void setRegion(String region) {
         this.region = region;
-    }
-    
-    public String getServiceName() {
-        return serviceName;
-    }
-    
-    public void setServiceName(String serviceName) {
-        this.serviceName = serviceName;
-    }
-    
-    public String getDockerfilePath() {
-        return dockerfilePath;
-    }
-    
-    public void setDockerfilePath(String dockerfilePath) {
-        this.dockerfilePath = dockerfilePath;
-    }
-    
-    public String getEnvironmentFile() {
-        return environmentFile;
-    }
-    
-    public void setEnvironmentFile(String environmentFile) {
-        this.environmentFile = environmentFile;
-    }
-    
-    public int getContainerPort() {
-        return containerPort;
-    }
-    
-    public void setContainerPort(int containerPort) {
-        this.containerPort = containerPort;
-    }
-    
-    public java.util.Map<String, String> getEnvironmentVariables() {
-        return environmentVariables;
-    }
-    
-    public void setEnvironmentVariables(java.util.Map<String, String> environmentVariables) {
-        this.environmentVariables = environmentVariables != null ? environmentVariables : new java.util.HashMap<>();
     }
     
     public int getCpu() {
@@ -192,10 +146,10 @@ public class FargateConfig {
     public String toString() {
         return "FargateConfig{" +
                 "region='" + region + '\'' +
-                ", serviceName='" + serviceName + '\'' +
-                ", dockerfilePath='" + dockerfilePath + '\'' +
-                ", environmentFile='" + environmentFile + '\'' +
-                ", containerPort=" + containerPort +
+                ", serviceName='" + getServiceName() + '\'' +
+                ", dockerfilePath='" + getDockerfilePath() + '\'' +
+                ", environmentFile='" + getEnvironmentFile() + '\'' +
+                ", containerPort=" + getContainerPort() +
                 ", cpu=" + cpu +
                 ", memory=" + memory +
                 ", desiredCount=" + desiredCount +

@@ -1,20 +1,14 @@
 package tools.muthuishere.spinx.gcp.cloudrun;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import java.util.Map;
+import tools.muthuishere.spinx.SpinxBaseConfig;
 import java.util.HashMap;
 
-public class GcpCloudRunConfig {
+public class GcpCloudRunConfig extends SpinxBaseConfig {
     
-    // Basic Configuration
+    // GCP-specific Configuration
     private String projectId;
     private String region;
-    private String serviceName;
-    
-    // Container Configuration
-    private String dockerfilePath;
-    private String environmentFile;
-    private int containerPort;
     
     // Resource Configuration
     private String cpu;
@@ -27,15 +21,12 @@ public class GcpCloudRunConfig {
     // Access Configuration
     private boolean allowUnauthenticated;
     
-    // Environment Variables
-    private Map<String, String> environmentVariables;
-    
     // Constructor
     public GcpCloudRunConfig() {
         this.region = "us-central1";
-        this.dockerfilePath = "Dockerfile";
-        this.environmentFile = ".env";
-        this.containerPort = 8080;
+        setDockerfilePath("Dockerfile");
+        setEnvironmentFile(".env");
+        setContainerPort(8080);
         this.cpu = "1";
         this.memory = "512Mi";
         this.minInstances = 0;
@@ -43,23 +34,23 @@ public class GcpCloudRunConfig {
         this.concurrency = 80;
         this.timeout = 300;
         this.allowUnauthenticated = true;
-        this.environmentVariables = new HashMap<>();
+        setEnvironmentVariables(new HashMap<>());
     }
     
     // Computed getters for derived names
     @JsonIgnore
     public String getArtifactRegistryRepository() {
-        return serviceName.toLowerCase().replace("_", "-");
+        return getServiceName().toLowerCase().replace("_", "-");
     }
     
     @JsonIgnore
     public String getImageUri() {
-        return region + "-docker.pkg.dev/" + projectId + "/" + getArtifactRegistryRepository() + "/" + serviceName.toLowerCase();
+        return region + "-docker.pkg.dev/" + projectId + "/" + getArtifactRegistryRepository() + "/" + getServiceName().toLowerCase();
     }
     
     @JsonIgnore
     public String getServiceUrl() {
-        return "https://" + serviceName.toLowerCase() + "-" + getRandomHash() + "-" + region + ".a.run.app";
+        return "https://" + getServiceName().toLowerCase() + "-" + getRandomHash() + "-" + region + ".a.run.app";
     }
     
     private String getRandomHash() {
@@ -82,38 +73,6 @@ public class GcpCloudRunConfig {
     
     public void setRegion(String region) {
         this.region = region;
-    }
-    
-    public String getServiceName() {
-        return serviceName;
-    }
-    
-    public void setServiceName(String serviceName) {
-        this.serviceName = serviceName;
-    }
-    
-    public String getDockerfilePath() {
-        return dockerfilePath;
-    }
-    
-    public void setDockerfilePath(String dockerfilePath) {
-        this.dockerfilePath = dockerfilePath;
-    }
-    
-    public String getEnvironmentFile() {
-        return environmentFile;
-    }
-    
-    public void setEnvironmentFile(String environmentFile) {
-        this.environmentFile = environmentFile;
-    }
-    
-    public int getContainerPort() {
-        return containerPort;
-    }
-    
-    public void setContainerPort(int containerPort) {
-        this.containerPort = containerPort;
     }
     
     public String getCpu() {
@@ -170,13 +129,5 @@ public class GcpCloudRunConfig {
     
     public void setAllowUnauthenticated(boolean allowUnauthenticated) {
         this.allowUnauthenticated = allowUnauthenticated;
-    }
-    
-    public Map<String, String> getEnvironmentVariables() {
-        return environmentVariables;
-    }
-    
-    public void setEnvironmentVariables(Map<String, String> environmentVariables) {
-        this.environmentVariables = environmentVariables;
     }
 }

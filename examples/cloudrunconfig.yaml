@@ -1,0 +1,15 @@
+projectId: "myspringai-test"
+region: "us-central1"
+serviceName: "todoapp-cloudrun"
+dockerfilePath: "Dockerfile"
+environmentFile: ".env"
+containerPort: 8080
+cpu: "1"
+memory: "512Mi"
+minInstances: 0
+maxInstances: 10
+concurrency: 80
+timeout: 300
+allowUnauthenticated: true
+environmentVariables:
+  SPRING_PROFILES_ACTIVE: "streamable"

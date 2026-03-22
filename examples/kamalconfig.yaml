@@ -1,0 +1,25 @@
+# Kamal deployment configuration
+# Deploy your containerized app to any VPS or server via SSH
+
+serviceName: "myapp"
+image: "myuser/myapp"       # Docker Hub image (or ghcr.io/myorg/myapp for GHCR)
+dockerfilePath: "Dockerfile"
+environmentFile: ".env"
+containerPort: 80
+
+# One or more SSH-reachable servers
+servers:
+  - "192.168.1.1"
+
+# Registry credentials
+registry:
+  # server: "ghcr.io"        # Omit for Docker Hub
+  username: "myuser"
+  passwordEnvVar: "KAMAL_REGISTRY_PASSWORD"   # env-var name, not the secret itself
+
+# SSH user on the target servers (default: root)
+sshUser: "root"
+
+# Optional inline environment variables (merged with .env file)
+# environmentVariables:
+#   APP_ENV: "production"
