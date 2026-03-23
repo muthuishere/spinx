@@ -35,6 +35,14 @@ public class AwsFargateDeployer implements CloudDeployer {
     
     private FargateConfig config;
     private String configFilename;
+
+    /**
+     * Secret variables loaded from {@code secretsFile} (values are never
+     * printed or logged).  These are injected as environment variables into the
+     * ECS container definition alongside the regular environment variables.
+     */
+    private Map<String, String> secretVariables = new HashMap<>();
+
     private EcsClient ecsClient;
     private Ec2Client ec2Client;
     private EcrClient ecrClient;
@@ -74,11 +82,18 @@ public class AwsFargateDeployer implements CloudDeployer {
                 String absoluteEnvPath = Paths.get(configDir, config.getEnvironmentFile()).normalize().toString();
                 config.setEnvironmentFile(absoluteEnvPath);
             }
+            if (config.getSecretsFile() != null && !Paths.get(config.getSecretsFile()).isAbsolute()) {
+                config.setSecretsFile(
+                        Paths.get(configDir, config.getSecretsFile()).normalize().toString());
+            }
             
             System.out.println("Loaded config: " + config);
             
             // Load environment variables using EnvironmentParser
             loadEnvironmentVariables();
+
+            // Load secrets from secretsFile — values are never logged
+            loadSecretsFromSecretsFile();
             
             initializeAwsClients();
                 
@@ -115,6 +130,21 @@ public class AwsFargateDeployer implements CloudDeployer {
         if (result.getEnvFileCount() > 0) {
             System.out.println("   📄 From .env file: " + result.getEnvFileCount());
         }
+    }
+
+    /**
+     * Load secrets from the {@code secretsFile} specified in the config.
+     * Values are <strong>never</strong> printed or logged; only key names are
+     * surfaced for diagnostic purposes.  The loaded secrets are stored in
+     * {@link #secretVariables} and injected as secret environment variables
+     * into the ECS container definition at deploy time.
+     */
+    private void loadSecretsFromSecretsFile() {
+        String configFileDirectory = configFilename != null
+                ? new java.io.File(configFilename).getParent()
+                : null;
+        this.secretVariables = tools.muthuishere.spinx.EnvironmentParser.loadSecretsFile(
+                config.getSecretsFile(), configFileDirectory);
     }
     
     private void initializeAwsClients() {
@@ -989,7 +1019,19 @@ public class AwsFargateDeployer implements CloudDeployer {
                 String displayValue = value.length() > 20 ? value.substring(0, 20) + "..." : value;
                 System.out.println("   🔑 " + entry.getKey() + "=" + displayValue);
             }
-            
+            if (!secretVariables.isEmpty()) {
+                // Log only key names, never values
+                System.out.println("🔒 Adding " + secretVariables.size() + " secret variable(s) to task definition: "
+                        + String.join(", ", secretVariables.keySet()));
+            }
+
+            // Merge regular env vars and secret vars into the container env (values never logged for secrets)
+            List<KeyValuePair> envPairs = new ArrayList<>();
+            config.getEnvironmentVariables().forEach((k, v) ->
+                    envPairs.add(KeyValuePair.builder().name(k).value(v).build()));
+            secretVariables.forEach((k, v) ->
+                    envPairs.add(KeyValuePair.builder().name(k).value(v).build()));
+
             RegisterTaskDefinitionRequest request = RegisterTaskDefinitionRequest.builder()
                 .family(config.getTaskDefinitionFamily())
                 .networkMode(NetworkMode.AWSVPC)
@@ -1014,14 +1056,7 @@ public class AwsFargateDeployer implements CloudDeployer {
                             "awslogs-stream-prefix", "ecs"
                         ))
                         .build())
-                    .environment(
-                        config.getEnvironmentVariables().entrySet().stream()
-                            .map(entry -> KeyValuePair.builder()
-                                .name(entry.getKey())
-                                .value(entry.getValue())
-                                .build())
-                            .toArray(KeyValuePair[]::new)
-                    )
+                    .environment(envPairs.toArray(new KeyValuePair[0]))
                     .build())
                 .build();
             

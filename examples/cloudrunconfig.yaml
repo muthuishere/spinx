@@ -1,0 +1,21 @@
+projectId: "myspringai-test"
+region: "us-central1"
+serviceName: "todoapp-cloudrun"
+dockerfilePath: "Dockerfile"
+environmentFile: ".env"
+containerPort: 8080
+cpu: "1"
+memory: "512Mi"
+minInstances: 0
+maxInstances: 10
+concurrency: 80
+timeout: 300
+allowUnauthenticated: true
+environmentVariables:
+  SPRING_PROFILES_ACTIVE: "streamable"
+
+# Optional: path to a secrets file (relative or absolute).
+# Values are NEVER logged. Add this file to .gitignore!
+# Format: KEY=value (same as .env). Suggested names:
+#   .env.secrets, .env.secrets.dev, .env.secrets.prod
+# secretsFile: ".env.secrets.prod"

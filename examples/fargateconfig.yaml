@@ -1,0 +1,17 @@
+region: "us-east-1"
+serviceName: "todo-mcp-server"
+dockerfilePath: "../Dockerfile"
+environmentFile: "../.env"
+containerPort: 8080
+cpu: 512
+memory: 1024
+desiredCount: 1
+healthCheckPath: "/api/health"
+healthCheckIntervalSeconds: 30
+deploymentTimeoutMinutes: 10
+
+# Optional: path to a secrets file (relative or absolute).
+# Values are NEVER logged. Add this file to .gitignore!
+# Format: KEY=value (same as .env). Suggested names:
+#   .env.secrets, .env.secrets.dev, .env.secrets.prod
+# secretsFile: ".env.secrets.prod"

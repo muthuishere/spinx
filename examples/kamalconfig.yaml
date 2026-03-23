@@ -1,0 +1,63 @@
+# Kamal deployment configuration
+# Deploy your containerized app to any VPS or server via SSH
+
+serviceName: "myapp"
+image: "myuser/myapp"       # Docker Hub image (or ghcr.io/myorg/myapp for GHCR)
+dockerfilePath: "Dockerfile"
+environmentFile: ".env"
+containerPort: 80
+
+# Path to a secrets file whose values are NEVER logged or committed.
+# File format is identical to .env  (KEY=value, one per line, # for comments).
+# Use environment-specific names, e.g. .env.secrets.dev / .env.secrets.prod.
+# Add this file to your .gitignore!
+#
+# Keys declared here are automatically added to the `secrets:` section in
+# deploy.yml.  The actual values are injected into the kamal subprocess
+# environment at deploy time so Kamal can pass them to the containers.
+#
+# secretsFile: ".env.secrets.prod"
+
+# One or more SSH-reachable servers
+servers:
+  - "192.168.1.1"
+
+# Registry credentials
+registry:
+  # server: "ghcr.io"        # Omit for Docker Hub
+  username: "myuser"
+  passwordEnvVar: "KAMAL_REGISTRY_PASSWORD"   # env-var name, not the secret itself
+
+# SSH user on the target servers (default: root)
+sshUser: "root"
+
+# Secret environment variable names – values come from the deploy-time environment
+# (or from `secretsFile` above) and are NEVER written to this file or deploy.yml
+# as plain text.
+secrets:
+  - SECRET_KEY_BASE
+  - DATABASE_PASSWORD
+
+# Optional inline environment variables (merged with .env file; visible in deploy.yml)
+# environmentVariables:
+#   APP_ENV: "production"
+
+# Accessory services managed by Kamal alongside the main app container
+accessories:
+  db:
+    image: "mysql:8.0"
+    host: "192.168.1.1"
+    port: 3306
+    secrets:
+      - MYSQL_ROOT_PASSWORD
+    env:
+      MYSQL_DATABASE: "myapp"
+    volumes:
+      - "/var/lib/mysql:/var/lib/mysql"
+
+  redis:
+    image: "redis:7.0"
+    host: "192.168.1.1"
+    port: 6379
+    volumes:
+      - "/var/lib/redis:/data"

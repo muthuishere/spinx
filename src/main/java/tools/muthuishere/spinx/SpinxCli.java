@@ -7,6 +7,7 @@ import picocli.CommandLine.Parameters;
 import tools.muthuishere.spinx.aws.fargate.AwsFargateDeployer;
 import tools.muthuishere.spinx.azure.containerapps.AzureContainerAppsDeployer;
 import tools.muthuishere.spinx.gcp.cloudrun.GcpCloudRunDeployer;
+import tools.muthuishere.spinx.kamal.KamalDeployer;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -21,7 +22,7 @@ import java.util.concurrent.Callable;
 )
 public class SpinxCli implements Callable<Integer> {
 
-    @Parameters(index = "0", description = "Cloud provider: aws-fargate, azure-container-apps, gcp-cloudrun")
+    @Parameters(index = "0", description = "Cloud provider: aws-fargate, azure-container-apps, gcp-cloudrun, kamal")
     private String provider;
 
     @Parameters(index = "1", description = "Action to perform: setup, deploy, destroy, logs")
@@ -74,9 +75,10 @@ public class SpinxCli implements Callable<Integer> {
                 case "aws-fargate" -> new AwsFargateDeployer();
                 case "azure-container-apps" -> new AzureContainerAppsDeployer();
                 case "gcp-cloudrun" -> new GcpCloudRunDeployer();
+                case "kamal" -> new KamalDeployer();
                 default -> {
                     System.err.println("Unknown provider: " + provider);
-                    System.err.println("Supported providers: aws-fargate, azure-container-apps, gcp-cloudrun");
+                    System.err.println("Supported providers: aws-fargate, azure-container-apps, gcp-cloudrun, kamal");
                     yield null;
                 }
             };

@@ -338,6 +338,36 @@ public class Runner {
             throw new RuntimeException(e);
         }
     }
+
+    /**
+     * Run a shell command with additional environment variables injected into
+     * the subprocess environment.  The extra variables are merged on top of the
+     * current process environment; keys already present in the process
+     * environment are overridden.
+     *
+     * <p><strong>Security note:</strong> The values of the extra environment
+     * variables are <strong>never</strong> printed or logged here.  Only the
+     * command string (which must not contain literal secret values) is logged.
+     *
+     * @param command   shell command to run via {@code sh -c}
+     * @param extraEnv  additional environment variables (e.g. runtime secrets)
+     */
+    public static void runCommandWithEnv(String command, java.util.Map<String, String> extraEnv) {
+        try {
+            System.out.println("Running: " + command);
+            ProcessBuilder pb = new ProcessBuilder("sh", "-c", command);
+            pb.directory(getProjectRoot());
+            if (extraEnv != null && !extraEnv.isEmpty()) {
+                pb.environment().putAll(extraEnv);
+            }
+            pb.inheritIO()
+              .start()
+              .waitFor();
+        } catch (Exception e) {
+            System.err.println("Error running command: " + e.getMessage());
+            throw new RuntimeException(e);
+        }
+    }
     
     // Secure version that masks sensitive data in logs
     public static void runSecureCommand(String command, String description) {

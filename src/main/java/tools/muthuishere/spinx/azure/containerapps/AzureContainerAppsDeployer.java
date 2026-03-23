@@ -28,12 +28,22 @@ import org.yaml.snakeyaml.Yaml;
 
 import java.io.FileInputStream;
 import java.nio.file.Paths;
+import java.util.HashMap;
+import java.util.Map;
 
 
 public class AzureContainerAppsDeployer implements CloudDeployer {
     
     private AzureContainerAppsConfig config;
     private String configFilename;
+
+    /**
+     * Secret variables loaded from {@code secretsFile} (values are never
+     * printed or logged).  These are injected as secret environment variables
+     * into the Azure Container App at deploy time.
+     */
+    private Map<String, String> secretVariables = new HashMap<>();
+
     private AzureResourceManager azure;
     private LogAnalyticsManager logAnalyticsManager;
     private ContainerAppsApiManager containerAppsManager;
@@ -94,6 +104,10 @@ public class AzureContainerAppsDeployer implements CloudDeployer {
                 String absoluteEnvPath = Paths.get(configDir, config.getEnvironmentFile()).normalize().toString();
                 config.setEnvironmentFile(absoluteEnvPath);
             }
+            if (config.getSecretsFile() != null && !Paths.get(config.getSecretsFile()).isAbsolute()) {
+                config.setSecretsFile(
+                        Paths.get(configDir, config.getSecretsFile()).normalize().toString());
+            }
             
             // Auto-fetch subscription ID from Azure CLI if not provided or placeholder
             if (config.getSubscriptionId() == null || 
@@ -108,6 +122,9 @@ public class AzureContainerAppsDeployer implements CloudDeployer {
             
             // Load environment variables using EnvironmentParser
             loadEnvironmentVariables();
+
+            // Load secrets from secretsFile — values are never logged
+            loadSecretsFromSecretsFile();
             
             // Initialize Azure Resource Manager
             initializeAzureClient();
@@ -145,6 +162,20 @@ public class AzureContainerAppsDeployer implements CloudDeployer {
         if (result.getEnvFileCount() > 0) {
             System.out.println("   📄 From .env file: " + result.getEnvFileCount());
         }
+    }
+
+    /**
+     * Load secrets from the {@code secretsFile} specified in the config.
+     * Values are <strong>never</strong> printed or logged; only key names are
+     * surfaced.  The loaded secrets are injected as secret environment variables
+     * into the Azure Container App at deploy time.
+     */
+    private void loadSecretsFromSecretsFile() {
+        String configFileDirectory = configFilename != null
+                ? new java.io.File(configFilename).getParent()
+                : null;
+        this.secretVariables = EnvironmentParser.loadSecretsFile(
+                config.getSecretsFile(), configFileDirectory);
     }
     
     private void initializeAzureClient() {
@@ -859,6 +890,11 @@ public class AzureContainerAppsDeployer implements CloudDeployer {
                 String displayValue = value.length() > 20 ? value.substring(0, 20) + "..." : value;
                 System.out.println("   🔑 " + entry.getKey() + "=" + displayValue);
             }
+            if (!secretVariables.isEmpty()) {
+                // Log only key names, never values
+                System.out.println("🔒 Adding " + secretVariables.size() + " secret variable(s): "
+                        + String.join(", ", secretVariables.keySet()));
+            }
             
             // Create environment variables list for Azure Container
             java.util.List<com.azure.resourcemanager.appcontainers.models.EnvironmentVar> envVars = 
@@ -867,6 +903,11 @@ public class AzureContainerAppsDeployer implements CloudDeployer {
                         .withName(entry.getKey())
                         .withValue(entry.getValue()))
                     .collect(java.util.stream.Collectors.toList());
+            // Add secret variables (values from secretsFile) — key names only are logged
+            secretVariables.forEach((k, v) ->
+                    envVars.add(new com.azure.resourcemanager.appcontainers.models.EnvironmentVar()
+                            .withName(k)
+                            .withValue(v)));
             
             // Create container
             Container container = new Container()
