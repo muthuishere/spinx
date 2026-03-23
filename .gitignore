@@ -44,3 +44,18 @@ bin/
 
 ### NPM libs ###
 npm/libs/*.jar
+
+### gstack runtime artifacts ###
+.claude/skills/gstack/browse/dist/
+.claude/skills/gstack/node_modules/
+.claude/skills/gstack/.agents/
+.claude/skills/gstack/.context/
+.claude/skills/gstack/.gstack/
+.claude/skills/gstack/bin/gstack-global-discover
+.claude/skills/gstack/*.log
+.claude/skills/gstack/bun.lock
+.claude/skills/gstack/.env
+.claude/skills/gstack/.env.local
+
+### BMad output (generated artifacts) ###
+_bmad-output/
