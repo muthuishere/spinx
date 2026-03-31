@@ -6,7 +6,7 @@ plugins {
 }
 
 group = 'tools.muthuishere'
-version = '0.1.0'
+version = '0.2.0'
 
 java {
     toolchain { languageVersion = JavaLanguageVersion.of(21) }
@@ -94,6 +94,65 @@ tasks.test {
 
 
 
+tasks.register('createDistZip', Zip) {
+    group = 'distribution'
+    description = 'Package the standalone dist/ into spinx.zip for GitHub Releases (no admin needed to install)'
+
+    dependsOn 'createLocalDist'
+
+    archiveFileName = 'spinx.zip'
+    destinationDirectory = layout.buildDirectory.dir('dist-zip')
+    from('dist') {
+        include 'spinx.jar', 'spinx', 'spinx.cmd'
+    }
+}
+
+tasks.register('createLocalDist') {
+    group = 'distribution'
+    description = 'Build fat JAR and create dist/ with wrapper scripts for local PATH install (no admin required)'
+
+    dependsOn shadowJar
+
+    doLast {
+        def distDir = file('dist')
+        distDir.deleteDir()
+        distDir.mkdirs()
+
+        // Copy fat JAR into dist/
+        copy {
+            from tasks.shadowJar.archiveFile.get().asFile
+            into distDir
+            rename { 'spinx.jar' }
+        }
+
+        // Unix shell script wrapper
+        def unixScript = file('dist/spinx')
+        unixScript.text = """\
+#!/bin/sh
+exec java -jar "\$(dirname "\$0")/spinx.jar" "\$@"
+"""
+        unixScript.setExecutable(true)
+
+        // Windows launcher script (.cmd picked up by cmd.exe, PowerShell, and Windows Terminal)
+        // %~dp0 expands to the directory of this script, so spinx.jar is always found automatically.
+        def cmdScript = file('dist/spinx.cmd')
+        cmdScript.text = "@echo off\r\njava -jar \"%~dp0spinx.jar\" %*\r\n"
+
+        println ''
+        println '==================================================='
+        println " Spinx dist ready: ${distDir.absolutePath}"
+        println '==================================================='
+        println ' Add the following to your PATH to use spinx:'
+        println ''
+        println '   Unix/macOS – add to ~/.bashrc or ~/.zshrc:'
+        println "     export PATH=\"\$PATH:${distDir.absolutePath}\""
+        println ''
+        println '   Windows – add to user PATH via System Settings:'
+        println "     ${distDir.absolutePath}"
+        println '==================================================='
+    }
+}
+
 tasks.register('createNpmLib') {
     group = 'publishing'
     description = 'Creates a jar and copies it to npm/libs/spinx-lib.jar for npm publishing'
@@ -141,8 +200,10 @@ jreleaser {
     }
     files {
         artifacts {
+            def distZipPath = tasks.named('createDistZip').get().archiveFile.get().asFile.path
             artifact { path = "build/libs/${project.name}-${project.version}-all.jar" }
             artifact { path = "build/distributions/${project.name}-${project.version}.zip" }
+            artifact { path = distZipPath }
         }
     }
 }

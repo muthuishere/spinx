@@ -43,7 +43,52 @@ Multi-cloud deployment CLI for AWS Fargate, GCP Cloud Run, Azure Container Apps,
 
 ---
 
-### 2️⃣ Clone and Install Globally
+### 2️⃣ Install via npm
+
+**Option A – One-off usage with `npx` (no install, no admin needed):**
+
+```bash
+npx @muthuishere/spinx aws-fargate deploy -c ./examples/fargateconfig.yaml
+```
+
+**Option B – Global install (requires admin/sudo):**
+
+```bash
+npm install -g @muthuishere/spinx
+spinx aws-fargate deploy -c ./examples/fargateconfig.yaml
+```
+
+---
+
+### 3️⃣ Standalone install (no npm, no admin required)
+
+Download the pre-built zip from [GitHub Releases](https://github.com/muthuishere/spinx/releases), extract it, and add the folder to your `PATH`:
+
+**Unix / macOS:**
+```bash
+curl -LO https://github.com/muthuishere/spinx/releases/latest/download/spinx.zip
+unzip spinx.zip -d ~/.spinx
+# Add to ~/.bashrc or ~/.zshrc:
+export PATH="$PATH:$HOME/.spinx"
+```
+
+**Windows:**
+```bat
+:: Download spinx.zip from GitHub Releases, then:
+mkdir %USERPROFILE%\.spinx
+tar -xf spinx.zip -C %USERPROFILE%\.spinx
+:: Add %USERPROFILE%\.spinx to user PATH via System Settings → Environment Variables
+```
+
+Open a new terminal and run:
+
+```bash
+spinx --version
+```
+
+---
+
+### 4️⃣ Build from source and install locally
 
 ```bash
 git clone https://github.com/muthuishere/spinx.git
@@ -51,29 +96,65 @@ cd spinx
 task local-install
 ```
 
-This will:
-- Build the JAR library 
-- Install spinx globally via npm
-
-Now you can run `spinx` from anywhere:
-
-```bash
-spinx aws-fargate deploy -c ./examples/fargateconfig.yaml
-```
+This builds the fat JAR and creates a `dist/` directory with `spinx.jar` and wrapper scripts. Add `dist/` to your `PATH` to use `spinx` globally.
 
 ---
 
-### 3️⃣ Manual Build and Run (without global install)
+### 5️⃣ Manual Build and Run (without global install)
+
+Clone, build, and add the `dist/` folder to your PATH — **no admin/sudo required**.
+
+**Step 1 – Clone and build:**
 
 ```bash
-./gradlew shadowJar
-java -jar build/libs/spinx-0.1.0-all.jar <provider> <action> -c <config.yaml>
+git clone https://github.com/muthuishere/spinx.git
+cd spinx
+./gradlew createLocalDist
 ```
 
-Example:
+This creates a `dist/` directory with three files:
 
+| File | Platform | How it works |
+|---|---|---|
+| `spinx.jar` | All | Fat JAR with all dependencies bundled |
+| `spinx` | Unix / macOS | Shell script — calls `java -jar spinx.jar` from the same folder |
+| `spinx.cmd` | Windows | CMD script — calls `java -jar spinx.jar` from the same folder (`%~dp0` resolves to the script's own directory, so the JAR is always found automatically) |
+
+The build prints the exact path to add — copy it from the terminal output.
+
+**Step 2 – Add `dist/` to your PATH:**
+
+**Unix / macOS** – add to `~/.bashrc` or `~/.zshrc`, then reload:
 ```bash
-java -jar build/libs/spinx-0.1.0-all.jar gcp-cloudrun deploy -c ./examples/cloudrunconfig.yaml
+export PATH="$PATH:/path/to/spinx/dist"
+source ~/.bashrc   # or ~/.zshrc
+```
+
+**Windows** – open **Start → Edit the system environment variables → Environment Variables**, select **Path** under *User variables*, click **Edit**, and add the full path to the `dist\` folder, e.g.:
+```
+C:\path\to\spinx\dist
+```
+Open a new Command Prompt or PowerShell window after saving.
+
+**Step 3 – Verify:**
+```bash
+spinx --version
+```
+
+**Or skip PATH setup and run directly (no PATH change needed):**
+
+Unix/macOS:
+```bash
+./gradlew shadowJar
+java -jar build/libs/spinx-<version>-all.jar <provider> <action> -c <config.yaml>
+# or
+./gradlew run --args="aws-fargate deploy -c ./examples/fargateconfig.yaml"
+```
+
+Windows:
+```bat
+gradlew shadowJar
+java -jar build\libs\spinx-<version>-all.jar <provider> <action> -c <config.yaml>
 ```
 
 ---
@@ -245,8 +326,8 @@ spinx aws-lambda deploy -c ./lambda.yaml --dry-run
 1. Tag your release
 
    ```bash
-   git tag v0.1.0
-   git push origin v0.1.0
+   git tag v0.2.0
+   git push origin v0.2.0
    ```
 2. Run the release task
 
@@ -255,8 +336,8 @@ spinx aws-lambda deploy -c ./lambda.yaml --dry-run
    ```
 3. Your GitHub Release page will include:
 
-    * `spinx-0.1.0-all.jar`
-    * `spinx-0.1.0.zip` (OS-friendly scripts)
+    * `spinx-0.2.0-all.jar`
+    * `spinx-0.2.0.zip` (OS-friendly scripts)
 
 ---
 
