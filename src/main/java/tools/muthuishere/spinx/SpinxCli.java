@@ -8,6 +8,7 @@ import tools.muthuishere.spinx.aws.fargate.AwsFargateDeployer;
 import tools.muthuishere.spinx.azure.containerapps.AzureContainerAppsDeployer;
 import tools.muthuishere.spinx.gcp.cloudrun.GcpCloudRunDeployer;
 import tools.muthuishere.spinx.kamal.KamalDeployer;
+import tools.muthuishere.spinx.kamal.KamalSpecGenerator;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -25,10 +26,10 @@ public class SpinxCli implements Callable<Integer> {
     @Parameters(index = "0", description = "Cloud provider: aws-fargate, azure-container-apps, gcp-cloudrun, kamal")
     private String provider;
 
-    @Parameters(index = "1", description = "Action to perform: setup, deploy, destroy, logs")
+    @Parameters(index = "1", description = "Action to perform: setup, deploy, destroy, logs, generate-spec")
     private String action;
 
-    @Parameters(index = "2", description = "Config file path (YAML file with serviceName, port, dockerfilePath, environmentFile)")
+    @Parameters(index = "2", description = "Config file path (YAML file) or output path for generate-spec")
     private String configFile;
 
     @Option(names = {"-v", "--verbose"}, description = "Enable verbose output")
@@ -60,6 +61,22 @@ public class SpinxCli implements Callable<Integer> {
 
         if (verbose) {
             System.out.println("Resolved config file path: " + resolvedConfigFile);
+        }
+
+        // generate-spec writes to the given path — the file does not need to exist yet.
+        if ("generate-spec".equals(action)) {
+            if (!"kamal".equals(provider)) {
+                System.err.println("generate-spec is only supported for the kamal provider");
+                return 1;
+            }
+            try {
+                KamalSpecGenerator.generate(resolvedConfigFile);
+                return 0;
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
+                if (verbose) e.printStackTrace();
+                return 1;
+            }
         }
 
         if (!Files.exists(configPath)) {
@@ -103,7 +120,7 @@ public class SpinxCli implements Callable<Integer> {
                 case "logs" -> deployer.showLogs();
                 default -> {
                     System.err.println("Unknown action: " + action);
-                    System.err.println("Supported actions: setup, deploy, destroy, logs");
+                    System.err.println("Supported actions: setup, deploy, destroy, logs, generate-spec");
                     return 1;
                 }
             }

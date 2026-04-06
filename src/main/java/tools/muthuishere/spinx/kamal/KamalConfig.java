@@ -77,6 +77,21 @@ public class KamalConfig extends SpinxBaseConfig {
      */
     private Map<String, AccessoryConfig> accessories;
 
+    /**
+     * Base directory on the VPS for accessory data volumes.
+     * When an accessory has no explicit {@code volumes} list, Spinx automatically
+     * generates a volume mapping of the form:
+     * <pre>
+     *   &lt;storagePath&gt;/&lt;accessoryName&gt;:&lt;containerDataPath&gt;
+     * </pre>
+     * For example, with {@code storagePath: "/data/myapp"} and an accessory named
+     * {@code postgres}, the generated volume is
+     * {@code /data/myapp/postgres:/var/lib/postgresql/data}.
+     *
+     * <p>Default: {@code /var/lib}
+     */
+    private String storagePath = "/var/lib";
+
     // -----------------------------------------------------------------------
     // Nested: RegistryConfig
     // -----------------------------------------------------------------------
@@ -193,6 +208,11 @@ public class KamalConfig extends SpinxBaseConfig {
         this.accessories = accessories != null ? accessories : new LinkedHashMap<>();
     }
 
+    public String getStoragePath() { return storagePath; }
+    public void setStoragePath(String storagePath) {
+        this.storagePath = storagePath != null ? storagePath : "/var/lib";
+    }
+
     @Override
     public String toString() {
         return "KamalConfig{" +
@@ -203,8 +223,9 @@ public class KamalConfig extends SpinxBaseConfig {
                 ", environmentFile='" + getEnvironmentFile() + '\'' +
                 ", containerPort=" + getContainerPort() +
                 ", sshUser='" + sshUser + '\'' +
+                ", storagePath='" + storagePath + '\'' +
                 ", secrets=" + secrets +
-                ", accessories=" + accessories.keySet() +
+                ", accessories=" + (accessories != null ? accessories.keySet() : "[]") +
                 '}';
     }
 }

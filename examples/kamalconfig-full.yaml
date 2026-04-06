@@ -1,0 +1,105 @@
+# =============================================================================
+# Kamal deployment spec — full-featured example
+# Includes: PostgreSQL 16, Redis 7 (cache), Redis 7 (queue),
+#           custom storage path, and secret-manager integration.
+#
+# Generate a fresh copy of this file with:
+#   spinx kamal generate-spec ./kamalconfig-full.yaml
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Service identity
+# ---------------------------------------------------------------------------
+serviceName: "myapp"
+image: "myorg/myapp"          # Docker Hub: "user/image"  |  GHCR: "ghcr.io/org/image"
+dockerfilePath: "Dockerfile"
+environmentFile: ".env"
+containerPort: 3000
+
+# ---------------------------------------------------------------------------
+# Custom storage path
+# All accessory data volumes are rooted here when no explicit volume is set.
+# Ensure this directory exists on the VPS before the first deploy:
+#   ssh deploy@YOUR_VPS_IP 'mkdir -p /data/myapp'
+# ---------------------------------------------------------------------------
+storagePath: "/data/myapp"
+
+# ---------------------------------------------------------------------------
+# Secret manager — secretsFile
+# File format: KEY=value (same as .env — one entry per line, # for comments).
+# Add to .gitignore so it is NEVER committed to source control!
+# Key names are written to deploy.yml `secrets:`; values are NEVER logged.
+# ---------------------------------------------------------------------------
+secretsFile: ".env.secrets.prod"
+
+# ---------------------------------------------------------------------------
+# Target VPS servers (SSH-reachable IPs or hostnames)
+# ---------------------------------------------------------------------------
+servers:
+  - "YOUR_VPS_IP"
+
+# ---------------------------------------------------------------------------
+# Container registry
+# ---------------------------------------------------------------------------
+registry:
+  server: "ghcr.io"              # Remove this line to use Docker Hub
+  username: "YOUR_GITHUB_USERNAME"
+  passwordEnvVar: "KAMAL_REGISTRY_PASSWORD"  # Name of env-var holding the token
+
+# ---------------------------------------------------------------------------
+# SSH settings
+# ---------------------------------------------------------------------------
+sshUser: "deploy"               # SSH user on the VPS (must have Docker access)
+
+# ---------------------------------------------------------------------------
+# Application secrets — names only; values come from secretsFile or env
+# ---------------------------------------------------------------------------
+secrets:
+  - SECRET_KEY_BASE
+  - DATABASE_URL
+
+# ---------------------------------------------------------------------------
+# Application environment variables (visible in deploy.yml — no secrets here)
+# ---------------------------------------------------------------------------
+environmentVariables:
+  RAILS_ENV: "production"
+  REDIS_URL: "redis://redis:6379/0"        # Cache / session store
+  QUEUE_REDIS_URL: "redis://queue:6380/0"  # Job queue (Sidekiq / BullMQ / etc.)
+
+# ---------------------------------------------------------------------------
+# Accessory services (PostgreSQL, Redis cache, Redis queue)
+# Each service is managed by Kamal on the same VPS alongside the app.
+# ---------------------------------------------------------------------------
+accessories:
+
+  # PostgreSQL 16 — primary database
+  postgres:
+    image: "postgres:16"
+    host: "YOUR_VPS_IP"
+    port: 5432
+    secrets:
+      - POSTGRES_PASSWORD
+    env:
+      POSTGRES_USER: "myapp"
+      POSTGRES_DB: "myapp_production"
+    volumes:
+      - "/data/myapp/postgres:/var/lib/postgresql/data"
+
+  # Redis 7 — cache and session store
+  redis:
+    image: "redis:7.2-alpine"
+    host: "YOUR_VPS_IP"
+    port: 6379
+    volumes:
+      - "/data/myapp/redis:/data"
+
+  # Redis 7 — job queue (Sidekiq / BullMQ / etc.)
+  # Runs on port 6380 to keep queue traffic isolated from cache traffic.
+  queue:
+    image: "redis:7.2-alpine"
+    host: "YOUR_VPS_IP"
+    port: 6380
+    volumes:
+      - "/data/myapp/queue:/data"
+    env:
+      MAXMEMORY_POLICY: "noeviction"
