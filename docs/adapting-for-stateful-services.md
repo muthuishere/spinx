@@ -14,7 +14,7 @@ possible.
 1. [One config file per provider](#1-one-config-file-per-provider)
 2. [The shared base — identical across every file](#2-the-shared-base--identical-across-every-file)
 3. [Provider-specific fields](#3-provider-specific-fields)
-4. [`spinx init` — interactive setup with sensible defaults](#4-spinx-init--interactive-setup-with-sensible-defaults)
+4. [`spinx setup` — interactive scaffolding with sensible defaults](#4-spinx-setup--interactive-scaffolding-with-sensible-defaults)
 5. [Environment-specific files — dev, qa, prod](#5-environment-specific-files--dev-qa-prod)
 6. [Accessories — databases, Redis, queues](#6-accessories--databases-redis-queues)
 7. [Auto-wiring — how Spinx places env and secrets per provider](#7-auto-wiring--how-spinx-places-env-and-secrets-per-provider)
@@ -28,17 +28,22 @@ possible.
 
 ## 1. One config file per provider
 
-Each provider has its **own config file**. The files share an identical base
-structure (app fields, accessories, environment, secrets) and differ only in the
-small set of provider-specific deployment fields.
+Each provider has its **own config file**, stored in the `.spinxconfig/`
+directory. Spinx discovers all files in that directory automatically — you never
+need to specify a config path on the command line.
+
+The files share an identical base structure (app fields, accessories,
+environment, secrets) and differ only in the small set of provider-specific
+deployment fields.
 
 ```
 your-project/
-├── config.kamal.yaml        ← VPS / bare-metal via Kamal
-├── config.aws.yaml          ← AWS Fargate (ECS)
-├── config.gcp.yaml          ← GCP Cloud Run
-├── config.azure.yaml        ← Azure Container Apps
-├── config.k8s.yaml          ← Kubernetes  (future)
+├── .spinxconfig/
+│   ├── config.kamal.yaml        ← VPS / bare-metal via Kamal
+│   ├── config.aws.yaml          ← AWS Fargate (ECS)
+│   ├── config.gcp.yaml          ← GCP Cloud Run
+│   ├── config.azure.yaml        ← Azure Container Apps
+│   └── config.k8s.yaml          ← Kubernetes  (future)
 │
 ├── application.env          ← non-secret env vars, base (commit this ✅)
 ├── application.dev.env      ← dev overrides, non-secret  (commit this ✅)
@@ -51,13 +56,13 @@ your-project/
 └── secrets.prod.env         ← prod secret values (NEVER commit ❌)
 ```
 
-Usage:
+Core commands — the same regardless of which provider(s) you use:
 
 ```bash
-spinx kamal deploy              -c config.kamal.yaml --env prod
-spinx aws-fargate deploy        -c config.aws.yaml   --env prod
-spinx gcp-cloudrun deploy       -c config.gcp.yaml   --env qa
-spinx azure-container-apps deploy -c config.azure.yaml --env dev
+spinx setup             # scan .spinxconfig/, generate missing files, validate
+spinx deploy --env prod # deploy using all configs in .spinxconfig/
+spinx logs              # stream logs from the running service
+spinx remove            # tear down the deployment
 ```
 
 ---
@@ -202,21 +207,22 @@ ingressClass: "nginx"
 
 ---
 
-## 4. `spinx init` — interactive setup with sensible defaults
+## 4. `spinx setup` — interactive scaffolding with sensible defaults
 
-Running `spinx init` starts an **interactive prompt** that asks a few questions
-and generates the correct config file and secrets template — no manual editing
-of YAML required to get started.
+Running `spinx setup` starts an **interactive prompt** that asks a few questions
+and generates provider config files in `.spinxconfig/`, plus env and secrets
+templates — no manual editing of YAML required to get started. On subsequent
+runs it scans `.spinxconfig/` and validates or updates existing configs.
 
 ```
-$ spinx init
+$ spinx setup
 
-? Which provider?
-  ❯ kamal  (VPS / bare-metal)
-    aws    (AWS Fargate / ECS)
-    gcp    (GCP Cloud Run)
-    azure  (Azure Container Apps)
-    k8s    (Kubernetes)
+? Which provider(s) do you want to configure? (space to select)
+  ❯ ✔ kamal  (VPS / bare-metal)
+    ✔ aws    (AWS Fargate / ECS)
+      gcp    (GCP Cloud Run)
+      azure  (Azure Container Apps)
+      k8s    (Kubernetes)
 
 ? Service name: [myapp]
 ? Container port: [3000]
@@ -237,7 +243,13 @@ $ spinx init
 ? Registry username: [myorg]
 ? SSH user: [deploy]
 
-✔ Generated  config.kamal.yaml
+  For aws:
+? AWS region: [us-east-1]
+? ECR repository URI: [123456789.dkr.ecr.us-east-1.amazonaws.com/myapp]
+? ECS cluster name: [myapp-cluster]
+
+✔ Generated  .spinxconfig/config.kamal.yaml
+✔ Generated  .spinxconfig/config.aws.yaml
 ✔ Generated  application.env          (base env vars — commit this)
 ✔ Generated  application.dev.env      (dev overrides — commit this)
 ✔ Generated  application.qa.env       (qa overrides  — commit this)
@@ -249,12 +261,21 @@ $ spinx init
 ✔ Updated    .gitignore               (added secrets.*.env)
 ```
 
+After running `spinx setup`, the core workflow is:
+
+```bash
+spinx setup              # (re)scan .spinxconfig/, validate, generate missing files
+spinx deploy --env prod  # deploy using every config found in .spinxconfig/
+spinx logs               # stream logs from the running service
+spinx remove             # tear down the deployment
+```
+
 ### What gets generated
 
-**`config.kamal.yaml`** — fully commented, ready to deploy:
+**`.spinxconfig/config.kamal.yaml`** — fully commented, ready to deploy:
 
 ```yaml
-# Generated by `spinx init` — edit as needed
+# Generated by `spinx setup` — edit as needed
 
 serviceName: "myapp"
 dockerfilePath: "Dockerfile"
@@ -302,7 +323,7 @@ sshUser: "deploy"
 ready to fill in (one generated per environment):
 
 ```
-# Generated by `spinx init` — fill in real values. NEVER commit this file.
+# Generated by `spinx setup` — fill in real values. NEVER commit this file.
 # Add secrets.*.env to your .gitignore
 
 # Registry
@@ -322,15 +343,15 @@ hunt through logs or documentation to discover missing secrets.
 ### File tracking
 
 ```
-config.kamal.yaml      ← commit to source control ✅
-application.env        ← commit to source control ✅  (base non-secret env vars)
-application.dev.env    ← commit to source control ✅  (dev overrides)
-application.qa.env     ← commit to source control ✅  (qa overrides)
-application.prod.env   ← commit to source control ✅  (prod overrides)
-secrets.env            ← commit to source control ✅  (keys only, CHANGE_ME values)
-secrets.dev.env        ← NEVER commit ❌  (real dev secrets)
-secrets.qa.env         ← NEVER commit ❌  (real qa secrets)
-secrets.prod.env       ← NEVER commit ❌  (real prod secrets)
+.spinxconfig/config.kamal.yaml  ← commit to source control ✅
+application.env                 ← commit to source control ✅  (base non-secret env vars)
+application.dev.env             ← commit to source control ✅  (dev overrides)
+application.qa.env              ← commit to source control ✅  (qa overrides)
+application.prod.env            ← commit to source control ✅  (prod overrides)
+secrets.env                     ← commit to source control ✅  (keys only, CHANGE_ME values)
+secrets.dev.env                 ← NEVER commit ❌  (real dev secrets)
+secrets.qa.env                  ← NEVER commit ❌  (real qa secrets)
+secrets.prod.env                ← NEVER commit ❌  (real prod secrets)
 ```
 
 ---
@@ -364,7 +385,8 @@ secrets.*.env
 
 ### How profiles resolve at deploy time
 
-When you run `spinx aws-fargate deploy -c config.aws.yaml --env prod`, Spinx:
+When you run `spinx deploy --env prod`, Spinx reads every config in
+`.spinxconfig/` and for each one:
 
 1. Loads `application.env` (base non-secret env vars)
 2. Merges `application.prod.env` on top — values in the profile file win
@@ -428,18 +450,18 @@ The provider config files always reference the **base** file names. The profile
 is selected at deploy time with `--env`:
 
 ```yaml
-# config.aws.yaml
+# .spinxconfig/config.aws.yaml
 environmentFile: "application.env"
 secretsFile: "secrets.env"
 ```
 
 ```bash
-# Deploy to dev
-spinx aws-fargate deploy -c config.aws.yaml --env dev
+# Deploy to dev (Spinx reads .spinxconfig/config.aws.yaml automatically)
+spinx deploy --env dev
 # → loads application.env + application.dev.env + secrets.dev.env
 
 # Deploy to prod
-spinx aws-fargate deploy -c config.aws.yaml --env prod
+spinx deploy --env prod
 # → loads application.env + application.prod.env + secrets.prod.env
 ```
 
@@ -502,12 +524,13 @@ Kamal on the VPS alongside the main app. No extra infrastructure is required —
 it all runs on your server.
 
 ```bash
-spinx init                                              # generates config.kamal.yaml + env/secrets files
-spinx kamal deploy -c config.kamal.yaml --env prod      # build, push, deploy app + accessories
-spinx kamal logs   -c config.kamal.yaml                 # stream app logs
+spinx setup              # scans .spinxconfig/, generates .spinxconfig/config.kamal.yaml + env/secrets files
+spinx deploy --env prod  # build, push, deploy app + accessories
+spinx logs               # stream app logs
+spinx remove             # tear down the deployment
 ```
 
-Spinx reads `config.kamal.yaml`, generates a `deploy.yml`, and invokes Kamal.
+Spinx reads `.spinxconfig/config.kamal.yaml`, generates a `deploy.yml`, and invokes Kamal.
 The generated `deploy.yml` looks like:
 
 ```yaml
@@ -566,16 +589,16 @@ Actual values come from `secrets.<env>.env` at deploy time.
 
 On cloud platforms you use managed services (RDS, Cloud SQL, ElastiCache, etc.)
 instead of running database containers. The `accessories` block in
-`config.aws.yaml` / `config.gcp.yaml` / `config.azure.yaml` is identical to
-the Kamal version — the only difference is what you put in `secrets.prod.env`.
+`.spinxconfig/config.aws.yaml` / `.spinxconfig/config.gcp.yaml` / `.spinxconfig/config.azure.yaml`
+is identical to the Kamal version — the only difference is what you put in `secrets.prod.env`.
 
 ### Same config, different secret values
 
 ```
-config.kamal.yaml  ─┐
-config.aws.yaml    ─┤  accessories block is identical
-config.gcp.yaml    ─┤  environmentFile / secretsFile point to the same base files
-config.azure.yaml  ─┘
+.spinxconfig/config.kamal.yaml  ─┐
+.spinxconfig/config.aws.yaml    ─┤  accessories block is identical
+.spinxconfig/config.gcp.yaml    ─┤  environmentFile / secretsFile point to the same base files
+.spinxconfig/config.azure.yaml  ─┘
 
 secrets.prod.env (Kamal):
   DATABASE_URL=postgresql://myapp:pass@10.0.0.1:5432/myapp_prod        ← local container
@@ -590,9 +613,10 @@ secrets.prod.env (Azure):
   DATABASE_URL=postgresql://myapp:pass@myapp-db.postgres.database.azure.com:5432/myapp  ← Azure DB
 ```
 
-The app code and the config files are **identical** across providers. You swap
-the target by choosing a different config file; you swap the service endpoint
-by changing a line in `secrets.prod.env`.
+The app code and the config files are **identical** across providers. You run
+`spinx deploy --env prod` from the same project directory — Spinx reads every
+file in `.spinxconfig/` and deploys to all configured providers. Swapping the
+service endpoint only requires changing a line in `secrets.prod.env`.
 
 ### Accessory to managed service mapping
 
@@ -674,33 +698,36 @@ The rest of the config — including the accessories block — is unchanged.
 ```
 Stage 1 — VPS with Kamal  (works today)
 ────────────────────────────────────────────────────────────────────
-  spinx init                        → generates config.kamal.yaml +
-                                      application.env + secrets.env +
-                                      secrets.dev.env / secrets.prod.env
-  spinx kamal deploy -c config.kamal.yaml --env prod
+  spinx setup  (choose kamal)     → generates .spinxconfig/config.kamal.yaml +
+                                    application.env + secrets.env +
+                                    secrets.dev.env / secrets.prod.env
+  spinx deploy --env prod
+  └── reads .spinxconfig/config.kamal.yaml
   └── accessories: postgres, redis, queue run as containers on VPS
 
 Stage 2 — Cloud (managed services)  (works today)
 ────────────────────────────────────────────────────────────────────
-  spinx init  (choose aws / gcp / azure)
-                                    → generates config.aws.yaml +
-                                      application.env + secrets.env +
-                                      secrets.dev.env / secrets.prod.env
-  spinx aws-fargate deploy -c config.aws.yaml --env prod
+  spinx setup  (choose aws / gcp / azure)
+                                  → generates .spinxconfig/config.aws.yaml +
+                                    application.env + secrets.env +
+                                    secrets.dev.env / secrets.prod.env
+  spinx deploy --env prod
+  └── reads .spinxconfig/config.aws.yaml
   └── same accessories block — only secrets.prod.env values change to
       point at RDS / ElastiCache / Cloud SQL etc.
 
 Stage 3 — Cloud secret vaults  (proposed)
 ────────────────────────────────────────────────────────────────────
-  Replace secretsFile with secretsVault: in provider config
+  Replace secretsFile with secretsVault: in the config under .spinxconfig/
   └── Spinx fetches secrets from AWS Secrets Manager / GCP Secret
       Manager / Azure Key Vault at deploy time
 
 Stage 4 — Kubernetes  (proposed)
 ────────────────────────────────────────────────────────────────────
-  spinx init  (choose k8s)          → generates config.k8s.yaml +
-                                      application.env + secrets.env
-  spinx kubernetes deploy -c config.k8s.yaml --env prod
+  spinx setup  (choose k8s)       → generates .spinxconfig/config.k8s.yaml +
+                                    application.env + secrets.env
+  spinx deploy --env prod
+  └── reads .spinxconfig/config.k8s.yaml
   └── same accessories block → Spinx generates Deployment + Service +
       PVC manifests
   └── same secretsFile / secretsVault → Spinx generates Secret manifests
@@ -712,8 +739,9 @@ Stage 4 — Kubernetes  (proposed)
 |-------|--------------|-------------|
 | **Kamal full stack** | ✅ works today | ✅ none |
 | **Cloud managed services** | ✅ works today — only `secrets.prod.env` values differ | ✅ none |
-| **`spinx init` with interactive prompts** | ✅ none | New `InitCommand` — prompts + file generator |
-| **`spinx init` generates env + secrets per profile** | ✅ none | Part of `InitCommand` |
-| **`--env` profile flag** | ✅ none | Load + merge `application.<env>.env` and `secrets.<env>.env` at deploy time |
+| **`spinx setup` with interactive prompts** | ✅ none | Extend `SetupCommand` — prompts + file generator, write to `.spinxconfig/` |
+| **`spinx setup` generates env + secrets per profile** | ✅ none | Part of `SetupCommand` |
+| **`--env` profile flag on `spinx deploy`** | ✅ none | Load + merge `application.<env>.env` and `secrets.<env>.env` at deploy time |
+| **`spinx remove` command** | ✅ none | Alias / rename of existing `destroy` action |
 | **Cloud secret vaults** | Add `secretsVault:` field | New `SecretVaultLoader` per provider |
 | **Kubernetes provider** | Add `namespace`, `storageClass`, `ingressClass` | New `KubernetesDeployer` + manifest generators |
