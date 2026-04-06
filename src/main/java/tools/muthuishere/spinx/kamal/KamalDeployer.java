@@ -293,11 +293,6 @@ public class KamalDeployer implements CloudDeployer {
     /**
      * Builds the {@code accessories} section of deploy.yml from
      * {@link KamalConfig.AccessoryConfig} entries.
-     *
-     * <p>When an accessory has no explicit {@code volumes} list and
-     * {@code config.storagePath} is set, a volume mapping is auto-generated as:
-     * <pre>  &lt;storagePath&gt;/&lt;accessoryName&gt;:&lt;containerDataPath&gt;</pre>
-     * where {@code containerDataPath} is inferred from the accessory image name.
      */
     private void buildAccessoriesSection(Map<String, Object> deploy,
                                           Map<String, KamalConfig.AccessoryConfig> accessories) {
@@ -322,49 +317,13 @@ public class KamalDeployer implements CloudDeployer {
                 accMap.put("env", accEnv);
             }
 
-            // Volumes: use explicit list or auto-generate from storagePath
-            List<String> volumes = acc.getVolumes();
-            if ((volumes == null || volumes.isEmpty())
-                    && config.getStoragePath() != null
-                    && !config.getStoragePath().isBlank()) {
-                volumes = resolveDefaultVolumes(entry.getKey(), acc.getImage(), config.getStoragePath());
-            }
-            if (volumes != null && !volumes.isEmpty()) {
-                accMap.put("volumes", new ArrayList<>(volumes));
+            if (acc.getVolumes() != null && !acc.getVolumes().isEmpty()) {
+                accMap.put("volumes", new ArrayList<>(acc.getVolumes()));
             }
 
             accessoriesMap.put(entry.getKey(), accMap);
         }
         deploy.put("accessories", accessoriesMap);
-    }
-
-    /**
-     * Returns a single-element volume list derived from the given storage base
-     * path, accessory name, and image name.  The container-side mount point is
-     * inferred from well-known image names (postgres, mysql, redis, mongo,
-     * rabbitmq); unknown images fall back to {@code /data}.
-     */
-    private List<String> resolveDefaultVolumes(String accessoryName, String image, String storagePath) {
-        String containerPath = inferContainerDataPath(image);
-        String hostPath = (storagePath.endsWith("/")
-                ? storagePath.substring(0, storagePath.length() - 1)
-                : storagePath) + "/" + accessoryName;
-        return List.of(hostPath + ":" + containerPath);
-    }
-
-    /**
-     * Infers the canonical data-directory inside a container based on the
-     * image name.  Falls back to {@code /data} for unknown images.
-     */
-    static String inferContainerDataPath(String image) {
-        if (image == null) return "/data";
-        String lower = image.toLowerCase();
-        if (lower.contains("postgres"))  return "/var/lib/postgresql/data";
-        if (lower.contains("mysql") || lower.contains("mariadb")) return "/var/lib/mysql";
-        if (lower.contains("mongo"))     return "/data/db";
-        if (lower.contains("rabbitmq")) return "/var/lib/rabbitmq";
-        if (lower.contains("redis"))     return "/data";
-        return "/data";
     }
 }
 
