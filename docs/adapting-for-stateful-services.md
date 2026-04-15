@@ -3,192 +3,99 @@
 
 This document describes how Spinx YAML configuration should evolve to support
 stateful production infrastructure — Kamal (VPS), AWS Fargate, GCP Cloud Run,
-Azure Container Apps, and future Kubernetes — starting from the **normalised
-config that already exists in the codebase** and layering each new capability
-on top.
+Azure Container Apps, and future Kubernetes.
+
+Two design goals drive everything:
+
+1. **One file, provider modules** — a single `spinx.yaml` in the project root
+   with a top-level `providers:` map; each provider is a named module that
+   shares the common base and adds its own small section.
+2. **Accessories are default-on** — `postgres`, `redis`, and `queue` are
+   pre-configured with production-ready defaults. You declare them with a
+   single line. Optional `args:` lets you pass through any image env var when
+   you need to override a default.
 
 ---
 
 ## Table of Contents
 
-1. [The normalised existing config](#1-the-normalised-existing-config)
-2. [One config file per provider — `.spinxconfig/`](#2-one-config-file-per-provider--spinxconfig)
-3. [Provider-specific fields (what differs per file)](#3-provider-specific-fields-what-differs-per-file)
-4. [Accessories — databases, Redis, queues](#4-accessories--databases-redis-queues)
-5. [Environment-specific files — dev, qa, prod](#5-environment-specific-files--dev-qa-prod)
-6. [SecretResolver — secrets live in `~/config/spinx/`](#6-secretresolver--secrets-live-in-configspinx)
-7. [Auto-wiring — how Spinx places env and secrets per provider](#7-auto-wiring--how-spinx-places-env-and-secrets-per-provider)
-8. [Kamal (VPS) — accessories run as containers](#8-kamal-vps--accessories-run-as-containers)
-9. [Cloud providers — accessories map to managed services](#9-cloud-providers--accessories-map-to-managed-services)
-10. [Kubernetes — where everything maps to (proposed)](#10-kubernetes--where-everything-maps-to-proposed)
-11. [`spinx setup` — interactive scaffolding with sensible defaults](#11-spinx-setup--interactive-scaffolding-with-sensible-defaults)
-12. [Recommended evolution path](#12-recommended-evolution-path)
+1. [The normalised existing config (what we have today)](#1-the-normalised-existing-config-what-we-have-today)
+2. [Single-file design — `spinx.yaml` with provider modules](#2-single-file-design--spinxyaml-with-provider-modules)
+3. [Accessories — default-on with optional ARGS overrides](#3-accessories--default-on-with-optional-args-overrides)
+4. [Environment-specific files — dev, qa, prod](#4-environment-specific-files--dev-qa-prod)
+5. [SecretResolver — secrets in `~/config/spinx/`](#5-secretresolver--secrets-in-configspinx)
+6. [Auto-wiring — how Spinx places env and secrets per provider](#6-auto-wiring--how-spinx-places-env-and-secrets-per-provider)
+7. [Kamal (VPS) — accessories run as containers](#7-kamal-vps--accessories-run-as-containers)
+8. [Cloud providers — accessories map to managed services](#8-cloud-providers--accessories-map-to-managed-services)
+9. [Kubernetes — where everything maps to (proposed)](#9-kubernetes--where-everything-maps-to-proposed)
+10. [`spinx setup` — interactive scaffolding with fast onboarding](#10-spinx-setup--interactive-scaffolding-with-fast-onboarding)
+11. [Recommended evolution path](#11-recommended-evolution-path)
 
 ---
 
-## 1. The normalised existing config
+## 1. The normalised existing config (what we have today)
 
-`SpinxBaseConfig` is the common base class that every provider config extends.
-These fields exist **today** in the codebase and are the same in every provider
-YAML file:
+`SpinxBaseConfig` is the common base that every provider config extends. These
+fields exist **today** in the codebase and are the same in every provider YAML:
 
 ```yaml
-# ── App identity (SpinxBaseConfig) ──────────────────────────────────
 serviceName: "myapp"
-dockerfilePath: "Dockerfile"          # default: "Dockerfile"
-containerPort: 8080                   # default: 8080
-
-# ── Environment (SpinxBaseConfig) ────────────────────────────────────
-# Points to a .env-format file of non-secret key=value pairs.
-# EnvironmentParser loads this file and merges it with environmentVariables.
-environmentFile: "application.env"   # default: ".env"
-
-# Inline non-secret env vars (YAML takes precedence over environmentFile)
-environmentVariables:
+dockerfilePath: "Dockerfile"   # default: "Dockerfile"
+containerPort: 8080            # default: 8080
+environmentFile: ".env"        # default: ".env"  — loaded by EnvironmentParser
+environmentVariables:          # inline non-secret vars; YAML takes precedence
   APP_ENV: "production"
-
-# ── Secrets (SpinxBaseConfig) ─────────────────────────────────────────
-# secretsFile: a .env-format file whose values are NEVER logged or written
-# to any generated config in plain text.  Loaded by EnvironmentParser.loadSecretsFile().
-# Convention: ".env.secrets", ".env.secrets.dev", ".env.secrets.prod"
-# Add the file to .gitignore to prevent it being committed.
-secretsFile: ".env.secrets"
+secretsFile: ".env.secrets"    # loaded by EnvironmentParser.loadSecretsFile()
+                               # values are NEVER logged — add to .gitignore
 ```
 
-### Provider-specific classes that extend SpinxBaseConfig
+Provider-specific classes that extend `SpinxBaseConfig`:
 
-#### KamalConfig (VPS via Kamal)
+| Class | Provider | Extra fields |
+|-------|----------|-------------|
+| `KamalConfig` | VPS via Kamal | `image`, `servers`, `registry`, `sshUser`, `secrets`, `accessories` |
+| `FargateConfig` | AWS ECS Fargate | `region`, `cpu`, `memory`, `desiredCount`, `healthCheckPath`, `enableHttps`, … |
+| `GcpCloudRunConfig` | GCP Cloud Run | `projectId`, `region`, `cpu`, `memory`, `minInstances`, `maxInstances`, `allowUnauthenticated`, … |
+| `AzureContainerAppsConfig` | Azure Container Apps | `subscriptionId`, `resourceGroupName`, `location`, `cpu`, `memory`, `minReplicas`, `maxReplicas`, … |
 
-Adds the Kamal-specific fields on top of the base:
-
-```yaml
-# ── Kamal-specific (KamalConfig) ─────────────────────────────────────
-image: "ghcr.io/myorg/myapp"    # Docker image to push/pull; defaults to serviceName
-
-servers:
-  - "10.0.0.1"                  # SSH-reachable VPS IPs
-
-registry:
-  server: "ghcr.io"             # empty = Docker Hub
-  username: "myorg"
-  passwordEnvVar: "KAMAL_REGISTRY_PASSWORD"   # env-var name holding the password
-
-sshUser: "deploy"               # default: "root"
-
-# App-level secret key names passed to Kamal subprocess env at deploy time
-secrets:
-  - DATABASE_URL
-  - POSTGRES_PASSWORD
-
-# Accessory containers Kamal manages alongside the app
-accessories:
-  postgres:
-    image: "postgres:16"
-    host: "10.0.0.1"
-    port: 5432
-    secrets:
-      - POSTGRES_PASSWORD
-    env:
-      POSTGRES_USER: "myapp"
-      POSTGRES_DB: "myapp_prod"
-    volumes:
-      - "/var/lib/postgresql/data:/var/lib/postgresql/data"
-  redis:
-    image: "redis:7.2-alpine"
-    host: "10.0.0.1"
-    port: 6379
-    volumes:
-      - "/var/lib/redis:/data"
-```
-
-#### FargateConfig (AWS ECS Fargate)
-
-```yaml
-# ── AWS-specific (FargateConfig) ─────────────────────────────────────
-region: "us-east-1"
-cpu: 512
-memory: 1024
-desiredCount: 2
-healthCheckPath: "/api/health"
-healthCheckIntervalSeconds: 30
-deploymentTimeoutMinutes: 10
-enableHttps: true
-```
-
-#### GcpCloudRunConfig (GCP Cloud Run)
-
-```yaml
-# ── GCP-specific (GcpCloudRunConfig) ─────────────────────────────────
-projectId: "my-gcp-project"
-region: "us-central1"           # default: "us-central1"
-cpu: "1"
-memory: "512Mi"
-minInstances: 0
-maxInstances: 10
-concurrency: 80
-timeout: 300
-allowUnauthenticated: true
-```
-
-#### AzureContainerAppsConfig (Azure Container Apps)
-
-```yaml
-# ── Azure-specific (AzureContainerAppsConfig) ─────────────────────────
-subscriptionId: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-resourceGroupName: "myapp-rg"   # defaults to "<serviceName>-rg"
-location: "East US"
-cpu: "0.25"
-memory: "0.5Gi"
-minReplicas: 0
-maxReplicas: 10
-healthCheckPath: "/api/health"
-healthCheckIntervalSeconds: 30
-deploymentTimeoutMinutes: 10
-```
+The evolution described in this document keeps every existing field and adds
+the new capabilities on top.
 
 ---
 
-## 2. One config file per provider — `.spinxconfig/`
+## 2. Single-file design — `spinx.yaml` with provider modules
 
-Instead of one monolithic config, **each provider gets its own file** stored
-inside a `.spinxconfig/` directory at the project root. Spinx discovers every
-file in that directory automatically — no `-c` flag is needed on any command.
+Instead of one config file per provider, Spinx uses **one `spinx.yaml` in the
+project root** with a `providers:` map. Each key is a provider module that
+inherits the shared base and adds its small set of deployment fields.
 
 ```
-your-project/                        ← everything here is safe to commit
-├── .spinxconfig/
-│   ├── config.kamal.yaml            ← KamalConfig fields
-│   ├── config.aws.yaml              ← FargateConfig fields
-│   ├── config.gcp.yaml              ← GcpCloudRunConfig fields
-│   ├── config.azure.yaml            ← AzureContainerAppsConfig fields
-│   └── config.k8s.yaml             ← (proposed) Kubernetes
-│
-├── application.env                  ← non-secret base env vars  (commit ✅)
-├── application.dev.env              ← dev overrides             (commit ✅)
-├── application.qa.env               ← qa overrides              (commit ✅)
-└── application.prod.env             ← prod overrides            (commit ✅)
+your-project/
+├── spinx.yaml               ← single config, all providers, commit ✅
+├── application.env           ← non-secret base env vars, commit ✅
+├── application.dev.env       ← dev overrides, commit ✅
+├── application.qa.env        ← qa overrides, commit ✅
+└── application.prod.env      ← prod overrides, commit ✅
 
 # Secrets live outside the project — SecretResolver reads them at runtime:
-# ~/config/spinx/secrets/secrets.<env>.json   (never committed ❌)
+# ~/config/spinx/secrets/secrets.<env>.json   (never in the repo ❌)
 ```
 
-Core commands — the same regardless of which providers you use:
+Core commands — the same for every provider:
 
 ```bash
-spinx setup             # scan .spinxconfig/, prompt for missing info, generate files
-spinx deploy --env prod # deploy using every config found in .spinxconfig/
+spinx setup             # prompt interactively, generate spinx.yaml + env/secret files
+spinx deploy --env prod # deploy using every provider module in spinx.yaml
 spinx logs              # stream logs from the running service
 spinx remove            # tear down the deployment
 ```
 
-### The shared base section — identical in every file
-
-Every provider config file opens with the **same shared base** (all
-`SpinxBaseConfig` fields). Only the provider-specific section at the bottom
-differs:
+### Full `spinx.yaml` example
 
 ```yaml
-# ── Shared base — same in every .spinxconfig/ file ───────────────────
+# ─────────────────────────────────────────────────────────────────────
+# Shared base — inherited by every provider module
+# ─────────────────────────────────────────────────────────────────────
 serviceName: "myapp"
 dockerfilePath: "Dockerfile"
 containerPort: 3000
@@ -198,225 +105,222 @@ environmentFile: "application.env"
 environmentVariables:
   APP_ENV: "production"
 
-# Accessories — stateful services the app depends on.
-# Same block in every provider file — Spinx decides how to handle each:
-#   Kamal  → run as sidecar containers on the VPS
-#   Cloud  → env vars point at managed services (RDS, ElastiCache, etc.)
-#   K8s    → generate Deployment + Service + PVC manifests (proposed)
+# ── Accessories ───────────────────────────────────────────────────────
+# Each accessory has production-ready defaults built in.
+# Set to true  → use all defaults (fastest onboarding).
+# Set to false → disable.
+# Pass args:   → override specific container env vars.
+accessories:
+  postgres: true          # PostgreSQL 16, port 5432, auto-persisted volume
+  redis: true             # Redis 7, port 6379, auto-persisted volume
+  queue: true             # Redis 7 isolated, port 6380, noeviction policy
+
+# ── Providers ─────────────────────────────────────────────────────────
+# Each key is a provider module. The shared base above is inherited.
+# Spinx deploys to every provider listed here when you run `spinx deploy`.
+providers:
+
+  kamal:
+    image: "ghcr.io/myorg/myapp"
+    servers:
+      - "10.0.0.1"
+    registry:
+      server: "ghcr.io"
+      username: "myorg"
+      passwordEnvVar: "KAMAL_REGISTRY_PASSWORD"
+    sshUser: "deploy"
+
+  aws:
+    region: "us-east-1"
+    cpu: 512
+    memory: 1024
+    desiredCount: 2
+    healthCheckPath: "/api/health"
+    enableHttps: true
+
+  gcp:
+    projectId: "my-gcp-project"
+    region: "us-central1"
+    cpu: "1"
+    memory: "512Mi"
+    minInstances: 0
+    maxInstances: 10
+    allowUnauthenticated: true
+
+  azure:
+    subscriptionId: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+    resourceGroupName: "myapp-rg"
+    location: "East US"
+    cpu: "0.25"
+    memory: "0.5Gi"
+    minReplicas: 0
+    maxReplicas: 10
+```
+
+---
+
+## 3. Accessories — default-on with optional ARGS overrides
+
+### The three-line minimum
+
+The fastest onboarding is to declare all three accessories with a single
+boolean each:
+
+```yaml
+accessories:
+  postgres: true
+  redis: true
+  queue: true
+```
+
+Spinx fills in every default:
+
+| Accessory | Default image | Default port | Built-in env vars | Persisted volume |
+|-----------|--------------|--------------|-------------------|-----------------|
+| `postgres` | `postgres:16` | `5432` | `POSTGRES_DB=<serviceName>`, `POSTGRES_USER=<serviceName>` | `/var/lib/postgresql/data` |
+| `redis` | `redis:7.2-alpine` | `6379` | — | `/data` |
+| `queue` | `redis:7.2-alpine` | `6380` | `MAXMEMORY_POLICY=noeviction` | `/var/lib/queue-data` |
+
+Secret keys that SecretResolver will look up (values never hardcoded):
+
+| Accessory | Secret keys auto-wired |
+|-----------|------------------------|
+| `postgres` | `POSTGRES_PASSWORD`, `DATABASE_URL` |
+| `redis` | `REDIS_URL` *(optional — bare Redis needs no password by default)* |
+| `queue` | `QUEUE_URL` *(optional)* |
+
+### Overriding with `args:`
+
+When you need to change a specific container env var, add an `args:` map.
+Everything else stays at its default:
+
+```yaml
+accessories:
+  postgres:
+    args:
+      POSTGRES_DB: "myapp_prod"          # override the DB name
+      POSTGRES_USER: "app_user"          # override the user
+
+  redis: true                            # no overrides needed
+
+  queue:
+    args:
+      MAXMEMORY: "256mb"                 # set a memory cap on the queue
+      MAXMEMORY_POLICY: "allkeys-lru"    # change eviction policy
+```
+
+### Full accessory declaration (when you need everything explicit)
+
+The full form is available when you want to pin image versions or add extra
+env vars beyond the built-in defaults:
+
+```yaml
 accessories:
   postgres:
-    image: "postgres:16"
+    image: "postgres:15"          # pin to a specific version
     port: 5432
-    secrets:
-      - POSTGRES_PASSWORD
-      - DATABASE_URL
-    env:
-      POSTGRES_USER: "myapp"
+    args:
       POSTGRES_DB: "myapp_prod"
+      POSTGRES_USER: "app_user"
+    secrets:
+      - POSTGRES_PASSWORD         # additional secret key names
+      - DATABASE_URL
     volumes:
-      - "/var/lib/postgresql/data:/var/lib/postgresql/data"
+      - "/mnt/data/postgres:/var/lib/postgresql/data"   # override volume path
+
   redis:
-    image: "redis:7.2-alpine"
+    image: "redis:7.0"
     port: 6379
-    volumes:
-      - "/var/lib/redis:/data"
+
   queue:
-    image: "redis:7.2-alpine"
+    image: "redis:7.0"
     port: 6380
-    env:
-      MAXMEMORY_POLICY: "noeviction"
-    volumes:
-      - "/var/lib/queue:/data"
+    args:
+      MAXMEMORY: "256mb"
+      MAXMEMORY_POLICY: "allkeys-lru"
 
-# ── Provider-specific section below ──────────────────────────────────
+  rabbitmq:                       # add accessories beyond the defaults
+    image: "rabbitmq:3-management"
+    port: 5672
+    args:
+      RABBITMQ_DEFAULT_USER: "myapp"
+    secrets:
+      - RABBITMQ_DEFAULT_PASS
+
+  mongo:
+    image: "mongo:7"
+    port: 27017
+    secrets:
+      - MONGO_INITDB_ROOT_PASSWORD
 ```
 
-> **The accessories block is copied as-is into every provider file.** Spinx
-> reads the `accessories` block and handles it differently per target
-> (containers on Kamal, managed services on cloud, K8s manifests in future).
+### How `args:` are passed through
+
+`args:` entries map directly to container env vars. Spinx passes them to the
+accessory container exactly as written:
+
+- **Kamal** → `env.clear:` block in the generated `deploy.yml` for that accessory
+- **Cloud providers** → plain env vars on the managed-service connection configuration
+- **Kubernetes** *(future)* → `env:` block in the accessory `Deployment` spec
+
+Secret values are **never** in `args:`. If a value is sensitive, put the key
+name in `secrets:` and SecretResolver supplies the value at deploy time.
 
 ---
 
-## 3. Provider-specific fields (what differs per file)
+## 4. Environment-specific files — dev, qa, prod
 
-Below the shared base, each file adds its small provider-specific section.
+Non-secret env vars use a **base + profile override** pattern — all committed:
 
-### `config.kamal.yaml`
+```
+application.env          ← base vars, shared across all environments (commit ✅)
+application.dev.env      ← dev overrides  e.g. LOG_LEVEL=debug      (commit ✅)
+application.qa.env       ← qa overrides                              (commit ✅)
+application.prod.env     ← prod overrides e.g. LOG_LEVEL=warn        (commit ✅)
+```
+
+`spinx.yaml` always references the base file:
 
 ```yaml
-# ... shared base above ...
-
-image: "ghcr.io/myorg/myapp"
-
-servers:
-  - "10.0.0.1"
-
-registry:
-  server: "ghcr.io"
-  username: "myorg"
-  passwordEnvVar: "KAMAL_REGISTRY_PASSWORD"
-
-sshUser: "deploy"
-
-# App-level secret key names (values injected from SecretResolver at deploy time)
-secrets:
-  - DATABASE_URL
-  - POSTGRES_PASSWORD
-  - REDIS_PASSWORD
-```
-
-### `config.aws.yaml`
-
-```yaml
-# ... shared base above ...
-
-region: "us-east-1"
-cpu: 512
-memory: 1024
-desiredCount: 2
-healthCheckPath: "/api/health"
-healthCheckIntervalSeconds: 30
-deploymentTimeoutMinutes: 10
-enableHttps: true
-```
-
-### `config.gcp.yaml`
-
-```yaml
-# ... shared base above ...
-
-projectId: "my-gcp-project"
-region: "us-central1"
-cpu: "1"
-memory: "512Mi"
-minInstances: 0
-maxInstances: 10
-concurrency: 80
-timeout: 300
-allowUnauthenticated: true
-```
-
-### `config.azure.yaml`
-
-```yaml
-# ... shared base above ...
-
-subscriptionId: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-resourceGroupName: "myapp-rg"
-location: "East US"
-cpu: "0.25"
-memory: "0.5Gi"
-minReplicas: 0
-maxReplicas: 10
-healthCheckPath: "/api/health"
-deploymentTimeoutMinutes: 10
-```
-
-### `config.k8s.yaml` (proposed)
-
-```yaml
-# ... shared base above ...
-
-namespace: "production"
-storageClass: "standard"
-ingressClass: "nginx"
-```
-
----
-
-## 4. Accessories — databases, Redis, queues
-
-The `accessories` block (part of `KamalConfig`) uses a map of named entries,
-each following the `AccessoryConfig` structure:
-
-```yaml
-accessories:
-  <name>:
-    image: "<docker-image>"     # container image; informational on cloud providers
-    host: "<ip-or-hostname>"    # Kamal: where to run the accessory; omit on cloud
-    port: <number>
-    secrets:                    # key names; values resolved by SecretResolver (never logged)
-      - KEY_NAME
-    env:                        # non-secret env vars for this accessory
-      KEY: value
-    volumes:                    # host:container path mappings (Kamal / K8s)
-      - "/host/path:/container/path"
-```
-
-### Common accessory types
-
-| Name | Image | Port | Notes |
-|------|-------|------|-------|
-| `postgres` | `postgres:16` | 5432 | Pass `POSTGRES_PASSWORD` + `DATABASE_URL` via `secrets:` |
-| `mysql` | `mysql:8` | 3306 | Pass `MYSQL_ROOT_PASSWORD` via `secrets:` |
-| `redis` | `redis:7.2-alpine` | 6379 | Cache / session store |
-| `queue` | `redis:7.2-alpine` | 6380 | Isolated Redis for jobs; set `MAXMEMORY_POLICY: noeviction` |
-| `rabbitmq` | `rabbitmq:3-management` | 5672 | AMQP message broker |
-| `mongo` | `mongo:7` | 27017 | Document store |
-
----
-
-## 5. Environment-specific files — dev, qa, prod
-
-Non-secret env vars use a **base + profile override** pattern — all files are
-safe to commit:
-
-```
-application.env          ← base env vars shared across all environments (commit ✅)
-application.dev.env      ← dev-specific overrides, e.g. DEBUG=true       (commit ✅)
-application.qa.env       ← qa-specific overrides                          (commit ✅)
-application.prod.env     ← prod-specific overrides, e.g. LOG_LEVEL=warn  (commit ✅)
-```
-
-Provider config files always reference the **base** file. The profile is chosen
-at deploy time with `--env`:
-
-```yaml
-# .spinxconfig/config.aws.yaml  (and every other provider)
 environmentFile: "application.env"
-# SecretResolver reads ~/config/spinx/secrets/secrets.<env>.json at deploy time
+# Profile-specific file is selected at deploy time with --env
 ```
-
-### Profile resolution at deploy time
 
 When you run `spinx deploy --env prod`, Spinx:
 
-1. Loads `application.env` (base non-secret env vars)
+1. Loads `application.env` (base)
 2. Merges `application.prod.env` on top — profile values win
-3. Invokes SecretResolver to load prod secrets from
-   `~/config/spinx/secrets/secrets.prod.json` (local) or CI env vars (pipeline)
-4. Wires everything to the target platform (see §7)
+3. Invokes SecretResolver → `~/config/spinx/secrets/secrets.prod.json` (local)
+   or CI env vars (pipeline)
+4. Wires everything to each provider in `providers:` (see §6)
 
 ```
-application.env               ← base (always loaded)
+application.env               ← base
       +
-application.prod.env          ← profile overrides (merged on top)
+application.prod.env          ← profile overrides
       +
 SecretResolver (prod secrets) ← ~/config/spinx/secrets/secrets.prod.json  [local]
                                  or CI env vars                             [CI]
       =
-Final env + secrets injected into the prod deployment
+Final env + secrets → every provider module
 ```
 
 ### Example files
 
-**`application.env`** — base values, committed:
-
+**`application.env`** — committed:
 ```
 APP_NAME=myapp
 LOG_LEVEL=info
 CACHE_TTL=300
 ```
 
-**`application.prod.env`** — prod overrides, committed:
-
+**`application.prod.env`** — committed:
 ```
 LOG_LEVEL=warn
 CACHE_TTL=3600
 ```
 
-**`application.dev.env`** — dev overrides, committed:
-
+**`application.dev.env`** — committed:
 ```
 LOG_LEVEL=debug
 CACHE_TTL=0
@@ -424,74 +328,52 @@ CACHE_TTL=0
 
 ---
 
-## 6. SecretResolver — secrets live in `~/config/spinx/`
+## 5. SecretResolver — secrets in `~/config/spinx/`
 
-The existing `secretsFile` field in `SpinxBaseConfig` points to a file inside
-the project directory, which means it must be added to `.gitignore`.
-
-**The proposed evolution**: replace `secretsFile` with a **SecretResolver** that
-reads secrets from *outside* the project — so nothing needs to be added to
-`.gitignore` and there is no risk of accidentally committing secrets.
+The existing `secretsFile` field points to a file inside the project, which
+must be added to `.gitignore`. The proposed evolution replaces it with a
+**SecretResolver** that reads secrets from *outside* the project entirely.
 
 ### Where secrets come from
 
-| Runtime | Secret source |
-|---------|--------------|
+| Runtime | Source |
+|---------|--------|
 | **Local development** | `~/config/spinx/secrets/secrets.<env>.json` |
-| **CI (GitHub Actions)** | CI env vars set as repository secrets; SecretResolver auto-detects the CI environment |
-| **Future: cloud vault** | `secretsVault:` field → AWS Secrets Manager / GCP Secret Manager / Azure Key Vault |
+| **CI (GitHub Actions)** | Repository secrets → runner env vars; SecretResolver auto-detects |
+| **Future: cloud vault** | `secretsVault:` → AWS Secrets Manager / GCP Secret Manager / Azure Key Vault |
 
-### Local development — `~/config/spinx/`
+### Directory structure (outside the project)
 
 ```
 ~/config/spinx/
 ├── secrets/
-│   ├── secrets.dev.json    ← dev secrets  (your local machine only ❌ never in repo)
-│   ├── secrets.qa.json     ← qa secrets   (your local machine only ❌ never in repo)
-│   └── secrets.prod.json   ← prod secrets (your local machine only ❌ never in repo)
+│   ├── secrets.dev.json    ← dev secrets  (local only ❌)
+│   ├── secrets.qa.json     ← qa secrets   (local only ❌)
+│   └── secrets.prod.json   ← prod secrets (local only ❌)
 └── kamal/
-    └── <project-name>/
-        └── deploy.yml      ← generated Kamal config (regenerated on each deploy)
+    └── myapp/
+        └── deploy.yml      ← generated Kamal config (regenerated each deploy)
 ```
 
-Secrets are **outside the project repository** by design. SecretResolver finds
-them by convention — no `.gitignore` entries needed.
-
-`spinx setup` creates the skeleton JSON files on first run:
+### Secrets file format (JSON)
 
 ```json
-// ~/config/spinx/secrets/secrets.prod.json  — fill in real values
-{
-  "DATABASE_URL": "CHANGE_ME",
-  "POSTGRES_PASSWORD": "CHANGE_ME",
-  "REDIS_PASSWORD": "CHANGE_ME",
-  "KAMAL_REGISTRY_PASSWORD": "CHANGE_ME"
-}
-```
-
-### JSON format for secrets files
-
-The secrets files use **JSON** (not `.env` format) so the structure is explicit
-and typed:
-
-```json
+// ~/config/spinx/secrets/secrets.prod.json — fill in real values
 {
   "DATABASE_URL": "postgresql://myapp:s3cret@myapp.rds.amazonaws.com:5432/myapp",
   "POSTGRES_PASSWORD": "s3cret",
-  "REDIS_PASSWORD": "r3dis",
+  "REDIS_URL": "redis://:r3dis@myapp.cache.amazonaws.com:6379",
   "KAMAL_REGISTRY_PASSWORD": "ghp_xxxxxxxxxxxxxxxxxxxx"
 }
 ```
 
+`spinx setup` creates the skeleton JSON files with `CHANGE_ME` placeholders.
+You fill in real values on your machine — they never enter the repository.
+
 ### CI pipelines — GitHub Actions
 
-SecretResolver detects the CI environment (e.g. `CI=true` set by GitHub
-Actions) and reads secret values from the runner's environment variables.
-Those variables are configured as **repository secrets** in GitHub — they are
-never in source control:
-
 ```yaml
-# .github/workflows/deploy.yml  — excerpt
+# .github/workflows/deploy.yml — excerpt
 - name: Deploy to prod
   env:
     DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -500,67 +382,98 @@ never in source control:
   run: spinx deploy --env prod
 ```
 
-SecretResolver reads those env vars, optionally writes a short-lived temp file
-for any subprocess (e.g. Kamal), and deletes it immediately after the deploy.
-No secrets are ever persisted to the runner disk.
+SecretResolver detects `CI=true`, reads values from runner env vars, and
+optionally writes a short-lived temp file for any subprocess. The temp file
+is deleted immediately after the deploy.
 
 ### Cloud secret vaults (proposed)
-
-A future `secretsVault:` field in the provider config would let SecretResolver
-pull secrets from a cloud-native store at deploy time:
 
 ```yaml
 # Proposed — not yet implemented
 secretsVault:
-  provider: "aws-secrets-manager"   # or gcp-secret-manager / azure-key-vault
+  provider: "aws-secrets-manager"
   secretId: "myapp/prod"
   region: "us-east-1"
 ```
 
 ---
 
-## 7. Auto-wiring — how Spinx places env and secrets per provider
+## 6. Auto-wiring — how Spinx places env and secrets per provider
 
-`environmentFile` is declared once. When `--env <profile>` is given, Spinx
-merges the profile file on top of the base before wiring. Secrets come from
-SecretResolver (§6). The merged result is placed wherever the target platform
-expects it:
+`environmentFile` and accessories are declared once in `spinx.yaml`. Spinx
+wires them to each provider module automatically:
 
-| Platform | `environmentFile` + profile | Secrets (SecretResolver) |
-|----------|-----------------------------|--------------------------|
-| **Kamal** | Keys in `deploy.yml` `env.clear:` | Key *names* in `env.secret:`; values injected into Kamal subprocess env |
-| **AWS Fargate** | Plain env vars on ECS task definition | ECS secret env vars — never in task-definition JSON in plain text |
-| **GCP Cloud Run** | Env vars on the Cloud Run revision | Secret env vars on the revision |
-| **Azure Container Apps** | Env vars on the container app | Secret env vars on the container app |
-| **Kubernetes** *(future)* | `ConfigMap` mounted via `envFrom` | `Secret` mounted via `envFrom` |
-
-The same auto-wiring applies to accessory `secrets:` entries — Spinx resolves
-each key via SecretResolver and passes it to the accessory container (Kamal)
-or makes it available as a secret env var (cloud).
+| Provider | Non-secret env vars | Secrets (SecretResolver) | Accessories |
+|----------|--------------------|--------------------------|----|
+| **kamal** | `env.clear:` in `deploy.yml` | Key names in `env.secret:`; values injected into Kamal subprocess | Sidecar containers via `accessories:` in `deploy.yml` |
+| **aws** | Plain env vars on ECS task definition | ECS secret env vars (never in task-def JSON in plain text) | Wired to RDS / ElastiCache via env vars |
+| **gcp** | Env vars on Cloud Run revision | Secret env vars on the revision | Wired to Cloud SQL / Memorystore via env vars |
+| **azure** | Env vars on container app | Secret env vars on the container app | Wired to Azure DB / Cache for Redis via env vars |
+| **k8s** *(future)* | `ConfigMap` via `envFrom` | `Secret` via `envFrom` | Separate `Deployment` + `Service` + `PVC` |
 
 ---
 
-## 8. Kamal (VPS) — accessories run as containers
+## 7. Kamal (VPS) — accessories run as containers
 
-On Kamal every `accessories` entry becomes a **sidecar container** managed by
-Kamal on the VPS alongside the main app.
+On Kamal every accessory runs as a **sidecar container** managed by Kamal
+alongside the main app on the same VPS.
 
-```bash
-spinx setup             # generates .spinxconfig/config.kamal.yaml + env/secret files
-spinx deploy --env prod # build → push → deploy app + accessories via Kamal
-spinx logs              # stream app logs
-spinx remove            # tear down the deployment
-```
+Spinx reads `spinx.yaml`, expands the accessory defaults, generates a
+`deploy.yml` into `~/config/spinx/kamal/<project>/deploy.yml`, and invokes
+Kamal from there. The `deploy.yml` **never lives in the project directory**.
 
-Spinx reads `.spinxconfig/config.kamal.yaml`, generates a `deploy.yml` into
-`~/config/spinx/kamal/<project>/deploy.yml`, and invokes Kamal from there.
-The generated `deploy.yml` **never lives in the project directory**.
-
-The generated `deploy.yml` (from `KamalConfig` fields):
+### Accessory default expansion
 
 ```yaml
-# Generated by Spinx — ~/config/spinx/kamal/<project>/deploy.yml
-# Do not edit manually; re-run `spinx setup` to regenerate.
+# spinx.yaml (what you write)
+accessories:
+  postgres: true
+  redis: true
+  queue:
+    args:
+      MAXMEMORY: "256mb"
+```
+
+```yaml
+# Generated ~/config/spinx/kamal/myapp/deploy.yml (what Kamal sees)
+accessories:
+  postgres:
+    image: postgres:16
+    host: 10.0.0.1
+    port: 5432
+    env:
+      clear:
+        POSTGRES_DB: myapp
+        POSTGRES_USER: myapp
+      secret:
+        - POSTGRES_PASSWORD
+        - DATABASE_URL
+    volumes:
+      - /var/lib/postgresql/data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7.2-alpine
+    host: 10.0.0.1
+    port: 6379
+    volumes:
+      - /var/lib/redis:/data
+
+  queue:
+    image: redis:7.2-alpine
+    host: 10.0.0.1
+    port: 6380
+    env:
+      clear:
+        MAXMEMORY_POLICY: noeviction
+        MAXMEMORY: "256mb"       # ← from args:
+    volumes:
+      - /var/lib/queue-data:/data
+```
+
+Full generated `deploy.yml`:
+
+```yaml
+# Generated by Spinx — ~/config/spinx/kamal/myapp/deploy.yml
 service: myapp
 image: ghcr.io/myorg/myapp
 servers:
@@ -577,71 +490,39 @@ env:
     - DATABASE_URL
     - POSTGRES_PASSWORD
 accessories:
-  postgres:
-    image: postgres:16
-    host: 10.0.0.1
-    port: 5432
-    env:
-      clear:
-        POSTGRES_USER: myapp
-        POSTGRES_DB: myapp_prod
-      secret:
-        - POSTGRES_PASSWORD
-    volumes:
-      - /var/lib/postgresql/data:/var/lib/postgresql/data
-  redis:
-    image: redis:7.2-alpine
-    host: 10.0.0.1
-    port: 6379
-    volumes:
-      - /var/lib/redis:/data
-  queue:
-    image: redis:7.2-alpine
-    host: 10.0.0.1
-    port: 6380
-    env:
-      clear:
-        MAXMEMORY_POLICY: noeviction
-    volumes:
-      - /var/lib/queue:/data
+  # ... expanded as shown above ...
 ```
-
-Secret values are **never** written to `deploy.yml`. SecretResolver injects
-the actual values into the Kamal subprocess environment at deploy time.
 
 ---
 
-## 9. Cloud providers — accessories map to managed services
+## 8. Cloud providers — accessories map to managed services
 
-On cloud platforms you use managed services (RDS, Cloud SQL, ElastiCache, etc.)
-instead of running database containers. The `accessories` block in
-`config.aws.yaml` / `config.gcp.yaml` / `config.azure.yaml` is **identical**
-to the Kamal version — the only difference is the connection string value in
+On cloud platforms the `accessories` block in `spinx.yaml` is **the same**
+as the Kamal version — Spinx just wires the connection env vars differently.
+The only change is the connection string values in
 `~/config/spinx/secrets/secrets.prod.json`.
 
-### Same accessories block, different secret values
+### Same config, different secret values
 
 ```
-.spinxconfig/config.kamal.yaml  ─┐
-.spinxconfig/config.aws.yaml    ─┤  accessories block is identical
-.spinxconfig/config.gcp.yaml    ─┤  environmentFile points to the same base files
-.spinxconfig/config.azure.yaml  ─┘
+spinx.yaml  ─────────────────────────────────────────────────────────────
+accessories:
+  postgres: true    ← identical across all providers
+  redis: true
+  queue: true
 
-~/config/spinx/secrets/secrets.prod.json  (Kamal):
-  "DATABASE_URL": "postgresql://myapp:pass@10.0.0.1:5432/myapp_prod"
+~/config/spinx/secrets/secrets.prod.json  (kamal / local DB):
+  "DATABASE_URL": "postgresql://myapp:pass@10.0.0.1:5432/myapp"
 
-~/config/spinx/secrets/secrets.prod.json  (AWS):
-  "DATABASE_URL": "postgresql://myapp:pass@myapp.xyz.rds.amazonaws.com:5432/myapp_prod"
+~/config/spinx/secrets/secrets.prod.json  (aws / RDS):
+  "DATABASE_URL": "postgresql://myapp:pass@myapp.xyz.rds.amazonaws.com:5432/myapp"
 
-~/config/spinx/secrets/secrets.prod.json  (GCP):
-  "DATABASE_URL": "postgresql://myapp:pass@/myapp?host=/cloudsql/proj:region:instance"
+~/config/spinx/secrets/secrets.prod.json  (gcp / Cloud SQL):
+  "DATABASE_URL": "postgresql://myapp:pass@/myapp?host=/cloudsql/proj:region:inst"
 
-~/config/spinx/secrets/secrets.prod.json  (Azure):
+~/config/spinx/secrets/secrets.prod.json  (azure / Azure DB):
   "DATABASE_URL": "postgresql://myapp:pass@myapp-db.postgres.database.azure.com:5432/myapp"
 ```
-
-The app code and provider config files are **identical** across providers.
-Only the secret values in the local JSON file change.
 
 ### Accessory to managed service mapping
 
@@ -651,62 +532,45 @@ Only the secret values in the local JSON file change.
 | `redis` | Amazon ElastiCache | Cloud Memorystore | Azure Cache for Redis |
 | `queue` | Amazon SQS | Cloud Pub/Sub | Azure Service Bus |
 
-Queue services (SQS, Pub/Sub, Service Bus) are HTTP-based — pass their URLs
-via `environmentVariables` or SecretResolver. AWS SQS credentials come from
-the ECS task IAM role, so no secret value is needed in the config.
-
 ---
 
-## 10. Kubernetes — where everything maps to (proposed)
+## 9. Kubernetes — where everything maps to (proposed)
 
-`config.k8s.yaml` uses the same shared base and accessories block. Spinx would
-generate Kubernetes manifests from it:
+`spinx.yaml` adds a `k8s` provider module. Spinx generates Kubernetes
+manifests from the shared base + accessories:
 
 | Spinx field | Kubernetes object |
 |-------------|------------------|
-| `serviceName` | `Deployment` name + `Service` name |
+| `serviceName` | `Deployment` + `Service` name |
 | `containerPort` | Pod `containerPort`; `Service.spec.ports` |
-| `environmentFile` (via profile) | `ConfigMap` (mounted via `envFrom`) |
-| Secrets (via SecretResolver) | Kubernetes `Secret` (mounted via `envFrom`) |
-| `environmentVariables` | Inline `env:` on the container spec |
-| `accessories[*]` | Separate `Deployment` + `Service` + `PVC` |
-| `accessories[*].secrets` | `secretKeyRef` entries in the accessory pod |
-| `accessories[*].volumes` | `PersistentVolumeClaim` |
+| `environmentFile` (profile merged) | `ConfigMap` via `envFrom` |
+| Secrets via SecretResolver | `Secret` via `envFrom` |
+| `environmentVariables` | Inline `env:` on container spec |
+| `accessories[postgres]` | `Deployment` + `Service` + `PVC` |
+| `accessories[redis]` | `Deployment` + `Service` + `PVC` |
+| `accessories[queue]` | `Deployment` + `Service` + `PVC` |
+| Accessory `secrets:` | `secretKeyRef` entries in accessory pod |
 | `registry.passwordEnvVar` | `imagePullSecret` |
 
-Generated output:
-
-```
-k8s/
-├── app-deployment.yaml      ← serviceName, containerPort, env, secrets
-├── app-service.yaml
-├── app-configmap.yaml       ← environmentFile contents
-├── app-secret.yaml          ← secrets from SecretResolver (base64)
-├── postgres-deployment.yaml ← accessories.postgres
-├── postgres-service.yaml
-├── postgres-pvc.yaml
-├── redis-deployment.yaml
-├── redis-service.yaml
-└── redis-pvc.yaml
+```yaml
+# spinx.yaml — k8s provider module
+providers:
+  k8s:
+    namespace: "production"
+    storageClass: "standard"
+    ingressClass: "nginx"
 ```
 
 ---
 
-## 11. `spinx setup` — interactive scaffolding with sensible defaults
+## 10. `spinx setup` — interactive scaffolding with fast onboarding
 
-Running `spinx setup` prompts for provider(s), service name, port, accessories,
-environments, and provider-specific settings, then generates all files in the
-right places. On subsequent runs it rescans `.spinxconfig/` and validates or
-updates existing configs.
+`spinx setup` asks a few questions and generates everything — `spinx.yaml`,
+env files, and secrets templates. On subsequent runs it rescans `spinx.yaml`
+and validates/updates existing config.
 
 ```
 $ spinx setup
-
-? Which provider(s) do you want to configure?
-  ❯ ✔ kamal  (VPS / bare-metal)
-    ✔ aws    (AWS Fargate / ECS)
-      gcp    (GCP Cloud Run)
-      azure  (Azure Container Apps)
 
 ? Service name: [myapp]
 ? Container port: [3000]
@@ -717,41 +581,41 @@ $ spinx setup
     ✔ qa
     ✔ prod
 
-? Add PostgreSQL? (Y/n)  Y
-? Add Redis cache? (Y/n)  Y
-? Add message queue (separate Redis)? (Y/n)  Y
+? Which providers do you want to configure?
+  ❯ ✔ kamal  (VPS / bare-metal)
+    ✔ aws    (AWS Fargate / ECS)
+      gcp    (GCP Cloud Run)
+      azure  (Azure Container Apps)
+
+? Include PostgreSQL?  (Y/n)  Y
+? Include Redis cache? (Y/n)  Y
+? Include message queue (separate Redis)? (Y/n)  Y
+
+→ Accessories configured with defaults. Add  args:  to spinx.yaml to override.
 
   For kamal:
-? VPS IP address(es): [10.0.0.1]
-? Docker image (e.g. ghcr.io/myorg/myapp): [ghcr.io/myorg/myapp]
-? Registry server: [ghcr.io]
-? Registry username: [myorg]
-? SSH user: [deploy]
+? Docker image: [ghcr.io/myorg/myapp]
+? VPS IP(s): [10.0.0.1]
+? Registry: [ghcr.io]   Username: [myorg]   SSH user: [deploy]
 
   For aws:
-? AWS region: [us-east-1]
-? CPU units: [512]
-? Memory (MiB): [1024]
+? Region: [us-east-1]   CPU: [512]   Memory: [1024]
 
-✔ Generated  .spinxconfig/config.kamal.yaml            (commit ✅)
-✔ Generated  .spinxconfig/config.aws.yaml              (commit ✅)
-✔ Generated  application.env                           (commit ✅)
-✔ Generated  application.dev.env                       (commit ✅)
-✔ Generated  application.qa.env                        (commit ✅)
-✔ Generated  application.prod.env                      (commit ✅)
-✔ Generated  ~/config/spinx/secrets/secrets.dev.json   (local only ❌)
-✔ Generated  ~/config/spinx/secrets/secrets.qa.json    (local only ❌)
-✔ Generated  ~/config/spinx/secrets/secrets.prod.json  (local only ❌)
-✔ Generated  ~/config/spinx/kamal/myapp/deploy.yml     (local only ❌)
+✔  spinx.yaml                                    (commit ✅)
+✔  application.env                               (commit ✅)
+✔  application.dev.env                           (commit ✅)
+✔  application.qa.env                            (commit ✅)
+✔  application.prod.env                          (commit ✅)
+✔  ~/config/spinx/secrets/secrets.dev.json       (local only ❌)
+✔  ~/config/spinx/secrets/secrets.qa.json        (local only ❌)
+✔  ~/config/spinx/secrets/secrets.prod.json      (local only ❌)
+✔  ~/config/spinx/kamal/myapp/deploy.yml         (local only ❌)
 ```
 
-### What gets generated
-
-**`.spinxconfig/config.kamal.yaml`** — all `KamalConfig` fields, fully
-commented:
+### Generated `spinx.yaml`
 
 ```yaml
-# Generated by `spinx setup`
+# Generated by `spinx setup` — edit as needed
 
 serviceName: "myapp"
 dockerfilePath: "Dockerfile"
@@ -761,139 +625,114 @@ environmentFile: "application.env"
 environmentVariables:
   APP_ENV: "production"
 
+# Accessories — defaults are production-ready.
+# Add args: to override specific container env vars.
 accessories:
-  postgres:
-    image: "postgres:16"
-    port: 5432
-    secrets:
-      - POSTGRES_PASSWORD
-      - DATABASE_URL
-    env:
-      POSTGRES_USER: "myapp"
-      POSTGRES_DB: "myapp_prod"
-    volumes:
-      - "/var/lib/postgresql/data:/var/lib/postgresql/data"
-  redis:
-    image: "redis:7.2-alpine"
-    port: 6379
-    volumes:
-      - "/var/lib/redis:/data"
-  queue:
-    image: "redis:7.2-alpine"
-    port: 6380
-    env:
-      MAXMEMORY_POLICY: "noeviction"
-    volumes:
-      - "/var/lib/queue:/data"
+  postgres: true
+  redis: true
+  queue: true
 
-image: "ghcr.io/myorg/myapp"
-servers:
-  - "10.0.0.1"
-registry:
-  server: "ghcr.io"
-  username: "myorg"
-  passwordEnvVar: "KAMAL_REGISTRY_PASSWORD"
-sshUser: "deploy"
-secrets:
-  - DATABASE_URL
-  - POSTGRES_PASSWORD
-  - REDIS_PASSWORD
-  - KAMAL_REGISTRY_PASSWORD
+providers:
+
+  kamal:
+    image: "ghcr.io/myorg/myapp"
+    servers:
+      - "10.0.0.1"
+    registry:
+      server: "ghcr.io"
+      username: "myorg"
+      passwordEnvVar: "KAMAL_REGISTRY_PASSWORD"
+    sshUser: "deploy"
+
+  aws:
+    region: "us-east-1"
+    cpu: 512
+    memory: 1024
+    desiredCount: 1
+    healthCheckPath: "/health"
+    enableHttps: true
 ```
 
-**`~/config/spinx/secrets/secrets.prod.json`** — one file per environment,
-on your local machine (fill in real values):
+### Generated `~/config/spinx/secrets/secrets.prod.json`
 
 ```json
 {
   "KAMAL_REGISTRY_PASSWORD": "CHANGE_ME",
   "POSTGRES_PASSWORD": "CHANGE_ME",
-  "DATABASE_URL": "postgresql://myapp:CHANGE_ME@10.0.0.1:5432/myapp_prod",
-  "REDIS_PASSWORD": "CHANGE_ME"
+  "DATABASE_URL": "postgresql://myapp:CHANGE_ME@10.0.0.1:5432/myapp",
+  "REDIS_URL": "redis://10.0.0.1:6379"
 }
 ```
+
+Every key the deployment needs is visible from day one. Fill in real values on
+your local machine — they never enter the repository.
 
 ### File tracking
 
 ```
-.spinxconfig/config.kamal.yaml         ← commit ✅
-.spinxconfig/config.aws.yaml           ← commit ✅
-application.env                        ← commit ✅
-application.dev.env                    ← commit ✅
-application.qa.env                     ← commit ✅
-application.prod.env                   ← commit ✅
+spinx.yaml                                  ← commit ✅
+application.env                             ← commit ✅
+application.dev.env                         ← commit ✅
+application.qa.env                          ← commit ✅
+application.prod.env                        ← commit ✅
 
-~/config/spinx/secrets/secrets.dev.json    ← local only ❌
-~/config/spinx/secrets/secrets.qa.json     ← local only ❌
-~/config/spinx/secrets/secrets.prod.json   ← local only ❌
-~/config/spinx/kamal/<project>/deploy.yml  ← local only ❌
+~/config/spinx/secrets/secrets.dev.json     ← local only ❌
+~/config/spinx/secrets/secrets.qa.json      ← local only ❌
+~/config/spinx/secrets/secrets.prod.json    ← local only ❌
+~/config/spinx/kamal/myapp/deploy.yml       ← local only ❌
 ```
-
-Secrets and generated Kamal configs never enter the project repository.
-No `.gitignore` entries needed for any of them.
 
 ---
 
-## 12. Recommended evolution path
+## 11. Recommended evolution path
 
 ```
-Stage 1 — VPS with Kamal  (works with existing code)
+Stage 1 — VPS with Kamal
 ────────────────────────────────────────────────────────────────────
-  spinx setup  (choose kamal)
-  → .spinxconfig/config.kamal.yaml (KamalConfig fields)
-  → application.env + application.<env>.env
-  → ~/config/spinx/secrets/secrets.<env>.json  ← SecretResolver reads here locally
-  → ~/config/spinx/kamal/<project>/deploy.yml  ← generated Kamal config
-
+  spinx setup   → spinx.yaml (kamal provider) + env files + secrets templates
   spinx deploy --env prod
-  └── reads .spinxconfig/config.kamal.yaml
-  └── SecretResolver → ~/config/spinx/secrets/secrets.prod.json
-  └── accessories: postgres, redis, queue run as containers on VPS
+  └── accessories: postgres/redis/queue run as sidecar containers on VPS
+  └── SecretResolver reads ~/config/spinx/secrets/secrets.prod.json
+  └── Kamal deploy.yml generated to ~/config/spinx/kamal/myapp/
 
 Stage 2 — Cloud (managed services)
 ────────────────────────────────────────────────────────────────────
-  spinx setup  (choose aws / gcp / azure)
-  → .spinxconfig/config.aws.yaml (FargateConfig fields)
-  → same application.env / application.<env>.env files
-  → ~/config/spinx/secrets/secrets.<env>.json
-    (only DATABASE_URL value changes — points at RDS instead of local container)
-
-  In CI (GitHub Actions):
-  └── SecretResolver reads DATABASE_URL, etc. from runner env vars
-  └── no secrets files on disk — values come from CI repository secrets
+  spinx setup   → adds aws/gcp/azure provider module to spinx.yaml
+  spinx deploy --env prod
+  └── same accessories: true — only DATABASE_URL value in secrets.prod.json changes
+      (local container → RDS / Cloud SQL / Azure DB)
+  In CI:
+  └── SecretResolver reads from runner env vars (GitHub repo secrets)
+  └── no secrets files on disk
 
 Stage 3 — Cloud secret vaults  (proposed)
 ────────────────────────────────────────────────────────────────────
-  Add secretsVault: to the provider config:
+  Add to spinx.yaml:
     secretsVault:
       provider: "aws-secrets-manager"
       secretId: "myapp/prod"
-  └── SecretResolver fetches from AWS Secrets Manager / GCP Secret Manager /
-      Azure Key Vault at deploy time (no local JSON file needed)
+  └── SecretResolver fetches from vault at deploy time — no local JSON needed
 
 Stage 4 — Kubernetes  (proposed)
 ────────────────────────────────────────────────────────────────────
-  spinx setup  (choose k8s)
-  → .spinxconfig/config.k8s.yaml
-  → same application.env + secrets files
-
+  spinx setup   → adds k8s provider module to spinx.yaml
   spinx deploy --env prod
-  └── same accessories block → Spinx generates Deployment + Service + PVC manifests
+  └── accessories: true → Deployment + Service + PVC manifests generated
   └── SecretResolver → Kubernetes Secret manifests
 ```
 
-### What needs to change in Spinx to reach each stage
+### What needs to change in Spinx for each stage
 
 | Stage | Config change | Code change |
 |-------|--------------|-------------|
-| **Kamal full stack** | ✅ works today — `secretsFile` in `SpinxBaseConfig` | ✅ none |
-| **Cloud managed services** | Update secret values in `~/config/spinx/secrets/` | ✅ none |
-| **`.spinxconfig/` auto-discovery** | ✅ none | Extend `Runner` / `SpinxCli` — scan directory |
-| **`spinx setup` interactive prompts** | ✅ none | New `SetupCommand` — prompts + file generators |
-| **SecretResolver — local** | Remove `secretsFile` from project; add `~/config/spinx/secrets/` support | New `SecretResolver` — reads `~/config/spinx/secrets/secrets.<env>.json` |
-| **SecretResolver — CI** | ✅ none | `SecretResolver` detects `CI=true`, reads from runner env vars |
-| **`--env` profile flag** | ✅ none | Load + merge `application.<env>.env`; pass profile to `SecretResolver` |
-| **`spinx remove` command** | ✅ none | Alias / rename of existing `destroy` action |
+| **Kamal full stack** | ✅ works today — uses existing `secretsFile` | ✅ none |
+| **`spinx.yaml` single file + provider modules** | New top-level `providers:` map | `ConfigLoader` reads `spinx.yaml`, dispatches per provider key |
+| **Accessory defaults + `args:`** | `accessories: true` short-form | `AccessoryExpander` — fills defaults, merges `args:` |
+| **`spinx setup` interactive** | ✅ none | New `SetupCommand` — prompts + file generators |
+| **SecretResolver — local** | Remove `secretsFile`; add SecretResolver | Reads `~/config/spinx/secrets/secrets.<env>.json` |
+| **SecretResolver — CI** | ✅ none | Auto-detects `CI=true`, reads runner env vars |
+| **`--env` profile flag** | ✅ none | Merge `application.<env>.env`; pass to SecretResolver |
+| **`spinx remove` command** | ✅ none | Alias of existing `destroy` action |
 | **Kamal config in home dir** | ✅ none | Generate `deploy.yml` to `~/config/spinx/kamal/<project>/` |
-| **Cloud secret vaults** | Add `secretsVault:` field | `SecretResolver` vault backend |
+| **Cloud secret vaults** | Add `secretsVault:` field | SecretResolver vault backend |
 | **Kubernetes provider** | Add `namespace`, `storageClass`, `ingressClass` | New `KubernetesDeployer` + manifest generators |
