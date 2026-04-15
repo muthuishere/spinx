@@ -10,10 +10,12 @@ Two design goals drive everything:
 1. **One file, provider modules** — a single `spinx.yaml` in the project root
    with a top-level `providers:` map; each provider is a named module that
    shares the common base and adds its own small section.
-2. **Accessories are default-on** — `postgres`, `redis`, and `queue` are
-   pre-configured with production-ready defaults. You declare them with a
-   single line. Optional `args:` lets you pass through any image env var when
-   you need to override a default.
+2. **Accessories are default-on** — `postgres`, `redis`, and `queue` each
+   expose a small set of **mandatory first-class fields** (e.g. `dbname`,
+   `username`, `password` for postgres) that Spinx understands and wires
+   automatically. Everything beyond those mandatory fields is passed through
+   as `args:` — plain container env vars. The short-form `true` uses sensible
+   defaults for all mandatory fields so onboarding takes one line.
 
 ---
 
