@@ -24,7 +24,7 @@ Two design goals drive everything:
 1. [The normalised existing config (what we have today)](#1-the-normalised-existing-config-what-we-have-today)
 2. [Single-file design — `spinx.yaml` with provider modules](#2-single-file-design--spinxyaml-with-provider-modules)
 3. [Accessories — default-on with optional ARGS overrides](#3-accessories--default-on-with-optional-args-overrides)
-4. [`.spinxconfig/connections/` — connection strings, certs, and JSON configs](#4-spinxconfigconnections--connection-strings-certs-and-json-configs)
+4. [`~/config/spinx/<reponame>/accessories/` — per-provider accessory config](#4-configspinxreponameaccessories--per-provider-accessory-config)
 5. [Environment-specific files — dev, qa, prod](#5-environment-specific-files--dev-qa-prod)
 6. [SecretResolver — secrets in `~/config/spinx/`](#6-secretresolver--secrets-in-configspinx)
 7. [Auto-wiring — how Spinx places env and secrets per provider](#7-auto-wiring--how-spinx-places-env-and-secrets-per-provider)
@@ -74,27 +74,15 @@ inherits the shared base and adds its small set of deployment fields.
 
 ```
 your-project/
-├── spinx.yaml                    ← single config, all providers, commit ✅
-│
-├── .spinxconfig/                 ← generated connection configs, commit ✅
-│   └── connections/
-│       ├── postgres.dev.json     ← psql connection config for dev  (commit ✅)
-│       ├── postgres.qa.json      ← psql connection config for qa   (commit ✅)
-│       ├── postgres.prod.json    ← psql connection config for prod (commit ✅)
-│       ├── redis.dev.json        ← redis connection config for dev
-│       ├── redis.prod.json
-│       ├── queue.dev.json
-│       └── queue.prod.json
-│   # Certificates (e.g. RDS CA bundle, Redis TLS cert) go here too:
-│   # .spinxconfig/certs/rds-ca.pem   ← commit ✅  (public CA cert, not a secret)
-│
-├── application.env               ← non-secret base env vars, commit ✅
-├── application.dev.env           ← dev overrides, commit ✅
-├── application.qa.env            ← qa overrides, commit ✅
-└── application.prod.env          ← prod overrides, commit ✅
+├── spinx.yaml      ← single config, all providers, commit ✅
+├── .env            ← non-secret base env vars, commit ✅
+├── .env.dev        ← dev overrides, commit ✅
+├── .env.qa         ← qa overrides, commit ✅
+└── .env.prod       ← prod overrides, commit ✅
 
-# Secret values (passwords, tokens) never live in the project:
-# ~/config/spinx/secrets/secrets.<env>.json   (local only ❌)
+# Secrets and accessory connection configs live outside the project — never committed:
+# ~/config/spinx/<reponame>/secrets/secrets.<env>.json          (local only ❌)
+# ~/config/spinx/<reponame>/accessories/<provider>/accessories.json  (local only ❌)
 ```
 
 Core commands — the same for every provider:
@@ -103,7 +91,8 @@ Core commands — the same for every provider:
 spinx setup             # prompt interactively, generate spinx.yaml + env/secret files
 spinx deploy --env prod # deploy using every provider module in spinx.yaml
 spinx logs              # stream logs from the running service
-spinx remove            # tear down the deployment
+spinx remove            # remove the running deployment only (containers/services stay in infra)
+spinx uninstall         # remove everything Spinx created — containers, managed services, volumes
 ```
 
 ### Full `spinx.yaml` example
@@ -115,21 +104,32 @@ spinx remove            # tear down the deployment
 serviceName: "myapp"
 dockerfilePath: "Dockerfile"
 containerPort: 3000
-environmentFile: "application.env"
+environmentFile: ".env"          # default; profile file selected at deploy time with --env
 
 # Optional inline non-secret env vars
 environmentVariables:
   APP_ENV: "production"
 
 # ── Accessories ───────────────────────────────────────────────────────
-# Each accessory has production-ready defaults built in.
-# Set to true  → use all defaults (fastest onboarding).
-# Set to false → disable.
-# Pass args:   → override specific container env vars.
+# Mandatory fields: dbname, username, password (SecretResolver key),
+#                   connectionUrl (SecretResolver key for the full URL).
+# Everything else goes in args: — plain container env vars.
 accessories:
-  postgres: true          # PostgreSQL 16, port 5432, auto-persisted volume
-  redis: true             # Redis 7, port 6379, auto-persisted volume
-  queue: true             # Redis 7 isolated, port 6380, noeviction policy
+  postgres:
+    dbname: "myapp"
+    username: "myapp"
+    password: "POSTGRES_PASSWORD"   # SecretResolver key — value never hardcoded
+    connectionUrl: "DATABASE_URL"   # SecretResolver key for full psql:// string
+
+  redis:
+    password: "REDIS_PASSWORD"      # SecretResolver key (leave empty for no-auth local)
+    connectionUrl: "REDIS_URL"
+
+  queue:
+    password: "QUEUE_PASSWORD"
+    connectionUrl: "QUEUE_URL"
+    args:
+      MAXMEMORY: "256mb"            # extra image env vars
 
 # ── Providers ─────────────────────────────────────────────────────────
 # Each key is a provider module. The shared base above is inherited.
@@ -175,235 +175,325 @@ providers:
 
 ---
 
-## 3. Accessories — default-on with optional ARGS overrides
+## 3. Accessories — mandatory fields + optional ARGS
 
-### The three-line minimum
+Every accessory requires a small set of **mandatory first-class fields** that
+Spinx understands directly. Everything beyond those goes in `args:` as plain
+container env vars passed through verbatim.
 
-The fastest onboarding is to declare all three accessories with a single
-boolean each:
+### Mandatory fields per accessory
 
-```yaml
-accessories:
-  postgres: true
-  redis: true
-  queue: true
-```
+| Accessory | Mandatory field | Purpose |
+|-----------|----------------|---------|
+| `postgres` | `dbname` | Database name |
+| `postgres` | `username` | DB login user |
+| `postgres` | `password` | SecretResolver key whose value is the DB password |
+| `postgres` | `connectionUrl` | SecretResolver key whose value is the full `postgresql://` string |
+| `redis` | `password` | SecretResolver key (empty string = no-auth) |
+| `redis` | `connectionUrl` | SecretResolver key for the full `redis://` or `rediss://` URL |
+| `queue` | `password` | SecretResolver key |
+| `queue` | `connectionUrl` | SecretResolver key for the full URL |
 
-Spinx fills in every default:
+`password` and `connectionUrl` values are **never** hardcoded — they are the
+**key names** that SecretResolver looks up in `~/config/spinx/<reponame>/secrets/secrets.<env>.json`
+(or runner env vars in CI).
 
-| Accessory | Default image | Default port | Built-in env vars | Persisted volume |
-|-----------|--------------|--------------|-------------------|-----------------|
-| `postgres` | `postgres:16` | `5432` | `POSTGRES_DB=<serviceName>`, `POSTGRES_USER=<serviceName>` | `/var/lib/postgresql/data` |
-| `redis` | `redis:7.2-alpine` | `6379` | — | `/data` |
-| `queue` | `redis:7.2-alpine` | `6380` | `MAXMEMORY_POLICY=noeviction` | `/var/lib/queue-data` |
-
-Secret keys that SecretResolver will look up (values never hardcoded):
-
-| Accessory | Secret keys auto-wired |
-|-----------|------------------------|
-| `postgres` | `POSTGRES_PASSWORD`, `DATABASE_URL` |
-| `redis` | `REDIS_URL` *(optional — bare Redis needs no password by default)* |
-| `queue` | `QUEUE_URL` *(optional)* |
-
-### Overriding with `args:`
-
-When you need to change a specific container env var, add an `args:` map.
-Everything else stays at its default:
+### Standard declaration
 
 ```yaml
 accessories:
   postgres:
-    args:
-      POSTGRES_DB: "myapp_prod"          # override the DB name
-      POSTGRES_USER: "app_user"          # override the user
+    dbname: "myapp"
+    username: "myapp"
+    password: "POSTGRES_PASSWORD"   # SecretResolver key
+    connectionUrl: "DATABASE_URL"   # SecretResolver key
 
-  redis: true                            # no overrides needed
+  redis:
+    password: "REDIS_PASSWORD"
+    connectionUrl: "REDIS_URL"
 
   queue:
-    args:
-      MAXMEMORY: "256mb"                 # set a memory cap on the queue
-      MAXMEMORY_POLICY: "allkeys-lru"    # change eviction policy
+    password: "QUEUE_PASSWORD"
+    connectionUrl: "QUEUE_URL"
 ```
 
-### Full accessory declaration (when you need everything explicit)
+### Adding `args:` for extra env vars
 
-The full form is available when you want to pin image versions or add extra
-env vars beyond the built-in defaults:
+`args:` passes additional env vars straight to the container (or managed service
+configuration). Use it for anything beyond the four mandatory fields:
+
+```yaml
+accessories:
+  postgres:
+    dbname: "myapp_prod"
+    username: "app_user"
+    password: "POSTGRES_PASSWORD"
+    connectionUrl: "DATABASE_URL"
+    args:
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+
+  redis:
+    password: "REDIS_PASSWORD"
+    connectionUrl: "REDIS_URL"
+
+  queue:
+    password: "QUEUE_PASSWORD"
+    connectionUrl: "QUEUE_URL"
+    args:
+      MAXMEMORY: "256mb"
+      MAXMEMORY_POLICY: "allkeys-lru"
+```
+
+### Full accessory declaration (pinning image + volumes)
 
 ```yaml
 accessories:
   postgres:
     image: "postgres:15"          # pin to a specific version
     port: 5432
-    args:
-      POSTGRES_DB: "myapp_prod"
-      POSTGRES_USER: "app_user"
-    secrets:
-      - POSTGRES_PASSWORD         # additional secret key names
-      - DATABASE_URL
+    dbname: "myapp_prod"
+    username: "app_user"
+    password: "POSTGRES_PASSWORD"
+    connectionUrl: "DATABASE_URL"
     volumes:
-      - "/mnt/data/postgres:/var/lib/postgresql/data"   # override volume path
+      - "/mnt/data/postgres:/var/lib/postgresql/data"
+    args:
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
 
   redis:
     image: "redis:7.0"
     port: 6379
+    password: "REDIS_PASSWORD"
+    connectionUrl: "REDIS_URL"
 
   queue:
     image: "redis:7.0"
     port: 6380
+    password: "QUEUE_PASSWORD"
+    connectionUrl: "QUEUE_URL"
     args:
       MAXMEMORY: "256mb"
       MAXMEMORY_POLICY: "allkeys-lru"
 
-  rabbitmq:                       # add accessories beyond the defaults
+  rabbitmq:                       # custom accessory beyond the defaults
     image: "rabbitmq:3-management"
     port: 5672
+    username: "myapp"
+    password: "RABBITMQ_PASSWORD"
+    connectionUrl: "RABBITMQ_URL"
     args:
-      RABBITMQ_DEFAULT_USER: "myapp"
-    secrets:
-      - RABBITMQ_DEFAULT_PASS
+      RABBITMQ_DEFAULT_VHOST: "myapp"
+```
 
-  mongo:
-    image: "mongo:7"
-    port: 27017
-    secrets:
-      - MONGO_INITDB_ROOT_PASSWORD
+### What `postgres` means in each provider
+
+The `postgres` block in `spinx.yaml` is **identical** across all providers.
+Spinx reads the mandatory fields and wires them differently per target:
+
+#### Kamal (VPS / bare-metal)
+
+Spinx runs a **PostgreSQL 16 sidecar container** on the VPS and generates:
+
+```yaml
+# Generated ~/config/spinx/myapp/kamal/deploy.yml — accessories section
+accessories:
+  myapp-postgres:
+    image: postgres:16
+    host: 10.0.0.1          # ← read from ~/config/spinx/myapp/accessories/kamal/accessories.json
+    port: 5432
+    env:
+      clear:
+        POSTGRES_DB:   myapp
+        POSTGRES_USER: myapp
+      secret:
+        - POSTGRES_PASSWORD   # ← from ~/config/spinx/myapp/secrets/secrets.prod.json
+        - DATABASE_URL
+    volumes:
+      - /var/lib/postgresql/data:/var/lib/postgresql/data
+```
+
+The **host IP** and any **TLS certificates** for the VPS database are stored in
+`~/config/spinx/myapp/accessories/kamal/accessories.json` — set during `spinx setup`
+and printeed after setup completes. Spinx reads them at deploy time to build the
+Kamal config; they never go in `spinx.yaml`.
+
+#### AWS Fargate (Amazon RDS)
+
+Spinx does **not** run a container. It wires the RDS connection details as task
+environment variables on the ECS task definition:
+
+```
+DATABASE_URL    → "postgresql://myapp:<password>@myapp.xyz.rds.amazonaws.com:5432/myapp_prod?sslmode=verify-full"
+POSTGRES_PASSWORD → <resolved by SecretResolver>
+```
+
+Host, port, SSL mode, and the CA certificate path are stored in
+`~/config/spinx/myapp/accessories/aws/accessories.json`.
+
+#### Azure Container Apps (Azure Database for PostgreSQL)
+
+Same wiring, different host:
+
+```
+DATABASE_URL → "postgresql://myapp@myapp-server:<password>@myapp-server.postgres.database.azure.com:5432/myapp_prod?sslmode=require"
+```
+
+Host and SSL config stored in `~/config/spinx/myapp/accessories/azure/accessories.json`.
+
+#### GCP Cloud Run (Cloud SQL)
+
+Cloud SQL uses a Unix socket proxy. Spinx generates the correct connection string:
+
+```
+DATABASE_URL → "postgresql://myapp:<password>@/myapp_prod?host=/cloudsql/proj:region:instance"
+```
+
+Instance connection name stored in `~/config/spinx/myapp/accessories/gcp/accessories.json`.
+
+#### Kubernetes (proposed)
+
+Spinx generates a **PostgreSQL Deployment + Service + PersistentVolumeClaim** in
+the target namespace, plus a `Secret` for the password:
+
+```yaml
+# Generated — Deployment for the postgres accessory
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp-postgres
+spec:
+  containers:
+    - name: postgres
+      image: postgres:16
+      env:
+        - name: POSTGRES_DB
+          value: myapp
+        - name: POSTGRES_USER
+          value: myapp
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: myapp-secrets
+              key: POSTGRES_PASSWORD
 ```
 
 ### How `args:` are passed through
 
-`args:` entries map directly to container env vars. Spinx passes them to the
-accessory container exactly as written:
+`args:` entries map directly to container env vars:
 
 - **Kamal** → `env.clear:` block in the generated `deploy.yml` for that accessory
 - **Cloud providers** → plain env vars on the managed-service connection configuration
 - **Kubernetes** *(future)* → `env:` block in the accessory `Deployment` spec
 
-Secret values are **never** in `args:`. If a value is sensitive, put the key
-name in `secrets:` and SecretResolver supplies the value at deploy time.
-
 ---
 
-## 4. `.spinxconfig/connections/` — connection strings, certs, and JSON configs
+## 4. `~/config/spinx/<reponame>/accessories/` — per-provider accessory config
 
-Spinx generates a **`.spinxconfig/connections/`** directory inside the project
-for every accessory that has a connection. Each file is a JSON document with the
-structural (non-secret) connection details for one accessory + environment. The
-secret values (passwords, tokens) are **never** written here — they stay in
-`~/config/spinx/secrets/secrets.<env>.json` and are merged in by SecretResolver
-at deploy time.
+After `spinx setup`, Spinx writes one **`accessories.json`** file per provider
+into the user home config directory. This file stores the host/endpoint,
+port, SSL mode, TLS certificate paths, and any provider-specific connection
+details for every accessory.
 
-This folder is safe to commit. It gives every developer and CI job an
-instant, readable picture of what each service connection looks like without
-storing anything sensitive.
+These files live **outside the project** alongside secrets. They are printed
+to the terminal after every `spinx setup` run so you can verify and update them.
 
-### File layout
+### Directory layout (outside the project)
 
 ```
-.spinxconfig/
-├── connections/
-│   ├── postgres.dev.json
-│   ├── postgres.qa.json
-│   ├── postgres.prod.json
-│   ├── redis.dev.json
-│   ├── redis.prod.json
-│   ├── queue.dev.json
-│   └── queue.prod.json
-└── certs/
-    ├── rds-ca.pem          ← public CA bundle for RDS TLS (commit ✅ — not a secret)
-    └── redis-ca.pem        ← public CA for ElastiCache TLS (commit ✅)
+~/config/spinx/
+└── myapp/                                   ← <reponame>
+    ├── secrets/
+    │   ├── secrets.dev.json                 ← local only ❌
+    │   ├── secrets.qa.json
+    │   └── secrets.prod.json
+    ├── accessories/
+    │   ├── kamal/
+    │   │   └── accessories.json             ← VPS host IPs, certs  ❌
+    │   ├── aws/
+    │   │   └── accessories.json             ← RDS/ElastiCache endpoints ❌
+    │   ├── gcp/
+    │   │   └── accessories.json             ← Cloud SQL instance names ❌
+    │   └── azure/
+    │       └── accessories.json             ← Azure DB hostnames ❌
+    └── kamal/
+        └── deploy.yml                       ← generated Kamal config ❌
 ```
 
-### Connection file format
+### `accessories.json` format
 
-Each JSON file captures the **non-secret** structural details of the
-connection. Secret values are referenced by their **key name** only — the
-actual value is injected by SecretResolver.
-
-**`.spinxconfig/connections/postgres.prod.json`**
+**`~/config/spinx/myapp/accessories/kamal/accessories.json`** (VPS)
 
 ```json
 {
-  "accessory": "postgres",
-  "env": "prod",
-  "host": "myapp.xyz.rds.amazonaws.com",
-  "port": 5432,
-  "dbname": "myapp_prod",
-  "username": "myapp",
-  "sslMode": "verify-full",
-  "sslCert": ".spinxconfig/certs/rds-ca.pem",
-  "passwordSecretKey": "POSTGRES_PASSWORD",
-  "connectionUrlSecretKey": "DATABASE_URL"
+  "postgres": {
+    "host": "10.0.0.1",
+    "port": 5432,
+    "sslMode": "disable",
+    "connectionUrl": "postgresql://myapp:CHANGE_ME@10.0.0.1:5432/myapp"
+  },
+  "redis": {
+    "host": "10.0.0.1",
+    "port": 6379,
+    "tls": false,
+    "connectionUrl": "redis://10.0.0.1:6379"
+  },
+  "queue": {
+    "host": "10.0.0.1",
+    "port": 6380,
+    "tls": false,
+    "connectionUrl": "redis://10.0.0.1:6380"
+  }
 }
 ```
 
-**`.spinxconfig/connections/postgres.dev.json`** (local VPS via Kamal)
+**`~/config/spinx/myapp/accessories/aws/accessories.json`** (RDS + ElastiCache)
 
 ```json
 {
-  "accessory": "postgres",
-  "env": "dev",
-  "host": "10.0.0.1",
-  "port": 5432,
-  "dbname": "myapp_dev",
-  "username": "myapp",
-  "sslMode": "disable",
-  "passwordSecretKey": "POSTGRES_PASSWORD",
-  "connectionUrlSecretKey": "DATABASE_URL"
+  "postgres": {
+    "host": "myapp.xyz.rds.amazonaws.com",
+    "port": 5432,
+    "sslMode": "verify-full",
+    "sslCert": "~/.spinxconfig/certs/rds-ca.pem",
+    "connectionUrl": "postgresql://myapp:CHANGE_ME@myapp.xyz.rds.amazonaws.com:5432/myapp_prod?sslmode=verify-full"
+  },
+  "redis": {
+    "host": "myapp.cache.amazonaws.com",
+    "port": 6379,
+    "tls": true,
+    "connectionUrl": "rediss://:CHANGE_ME@myapp.cache.amazonaws.com:6379"
+  },
+  "queue": {
+    "host": "myapp-queue.cache.amazonaws.com",
+    "port": 6380,
+    "tls": true,
+    "connectionUrl": "rediss://:CHANGE_ME@myapp-queue.cache.amazonaws.com:6380"
+  }
 }
 ```
 
-**`.spinxconfig/connections/redis.prod.json`**
-
-```json
-{
-  "accessory": "redis",
-  "env": "prod",
-  "host": "myapp.cache.amazonaws.com",
-  "port": 6379,
-  "tls": true,
-  "sslCert": ".spinxconfig/certs/redis-ca.pem",
-  "passwordSecretKey": "REDIS_PASSWORD",
-  "connectionUrlSecretKey": "REDIS_URL"
-}
-```
-
-**`.spinxconfig/connections/queue.prod.json`**
-
-```json
-{
-  "accessory": "queue",
-  "env": "prod",
-  "host": "myapp-queue.cache.amazonaws.com",
-  "port": 6380,
-  "tls": true,
-  "passwordSecretKey": "QUEUE_PASSWORD",
-  "connectionUrlSecretKey": "QUEUE_URL"
-}
-```
-
-### How Spinx uses the connection files
+### How Spinx uses accessories.json
 
 When you run `spinx deploy --env prod`, Spinx:
 
-1. Reads `.spinxconfig/connections/<accessory>.prod.json` for each enabled accessory
-2. Calls SecretResolver to fill in the `passwordSecretKey` and `connectionUrlSecretKey` values
-3. Assembles the complete connection env vars (e.g. `DATABASE_URL`, `POSTGRES_PASSWORD`) and injects them into the deployment
+1. Reads `~/config/spinx/myapp/accessories/<provider>/accessories.json` for the provider being deployed
+2. Reads `~/config/spinx/myapp/secrets/secrets.prod.json` via SecretResolver
+3. Merges the structural connection data (host, port, sslMode) with the resolved secret values (password, full URL)
+4. Injects the complete `DATABASE_URL`, `REDIS_URL`, `QUEUE_URL` into the deployment environment
 
-The `connectionUrlSecretKey` value in `~/config/spinx/secrets/secrets.prod.json` can either be a full connection string you supply, or Spinx can derive it from the connection file's `host`, `port`, `dbname`, `username`, and the resolved `passwordSecretKey` value.
+### TLS certificates
 
-### Certificates
-
-TLS certificates (e.g. the RDS CA bundle, ElastiCache CA) are **public certificates** — they are safe to commit. Place them in `.spinxconfig/certs/` and reference them from the connection file's `sslCert` field. Spinx mounts or passes them to the deployer as needed.
+Public CA certificates (e.g. AWS RDS CA bundle) are **not secrets** — they can
+be stored anywhere accessible to Spinx. Convention: `~/.spinxconfig/certs/`:
 
 ```
-.spinxconfig/certs/
-├── rds-ca.pem          ← AWS RDS CA bundle (download from AWS docs — public ✅)
-└── redis-ca.pem        ← ElastiCache/Redis CA (public ✅)
+~/.spinxconfig/certs/
+├── rds-ca.pem        ← AWS RDS CA bundle (download from AWS docs)
+└── redis-ca.pem      ← ElastiCache/Redis CA
 ```
 
-Private keys and client certificates are secrets — they belong in
-`~/config/spinx/secrets/` or a cloud vault, never in `.spinxconfig/`.
+Reference them from the `accessories.json` `sslCert` field. Private keys and
+client certificates are secrets — store them in `~/config/spinx/myapp/secrets/`.
 
 ---
 
@@ -412,54 +502,54 @@ Private keys and client certificates are secrets — they belong in
 Non-secret env vars use a **base + profile override** pattern — all committed:
 
 ```
-application.env          ← base vars, shared across all environments (commit ✅)
-application.dev.env      ← dev overrides  e.g. LOG_LEVEL=debug      (commit ✅)
-application.qa.env       ← qa overrides                              (commit ✅)
-application.prod.env     ← prod overrides e.g. LOG_LEVEL=warn        (commit ✅)
+.env          ← base vars, shared across all environments (commit ✅)
+.env.dev      ← dev overrides  e.g. LOG_LEVEL=debug      (commit ✅)
+.env.qa       ← qa overrides                              (commit ✅)
+.env.prod     ← prod overrides e.g. LOG_LEVEL=warn        (commit ✅)
 ```
 
-`spinx.yaml` always references the base file:
+`spinx.yaml` always references the base file (`environmentFile: ".env"`).
+The profile file is selected at deploy time with `--env`:
 
 ```yaml
-environmentFile: "application.env"
-# Profile-specific file is selected at deploy time with --env
+environmentFile: ".env"    # default; profile merged at deploy time
 ```
 
 When you run `spinx deploy --env prod`, Spinx:
 
-1. Loads `application.env` (base)
-2. Merges `application.prod.env` on top — profile values win
-3. Invokes SecretResolver → `~/config/spinx/secrets/secrets.prod.json` (local)
+1. Loads `.env` (base)
+2. Merges `.env.prod` on top — profile values win
+3. Invokes SecretResolver → `~/config/spinx/myapp/secrets/secrets.prod.json` (local)
    or CI env vars (pipeline)
 4. Wires everything to each provider in `providers:` (see §7)
 
 ```
-application.env               ← base
+.env                ← base
       +
-application.prod.env          ← profile overrides
+.env.prod           ← profile overrides
       +
-SecretResolver (prod secrets) ← ~/config/spinx/secrets/secrets.prod.json  [local]
-                                 or CI env vars                             [CI]
+SecretResolver      ← ~/config/spinx/myapp/secrets/secrets.prod.json  [local]
+                       or CI env vars                                   [CI]
       =
 Final env + secrets → every provider module
 ```
 
 ### Example files
 
-**`application.env`** — committed:
+**`.env`** — committed:
 ```
 APP_NAME=myapp
 LOG_LEVEL=info
 CACHE_TTL=300
 ```
 
-**`application.prod.env`** — committed:
+**`.env.prod`** — committed:
 ```
 LOG_LEVEL=warn
 CACHE_TTL=3600
 ```
 
-**`application.dev.env`** — committed:
+**`.env.dev`** — committed:
 ```
 LOG_LEVEL=debug
 CACHE_TTL=0
@@ -467,22 +557,22 @@ CACHE_TTL=0
 
 ---
 
-## 6. SecretResolver — secrets in `~/config/spinx/`
+## 6. SecretResolver — secrets in `~/config/spinx/<reponame>/`
 
 The existing `secretsFile` field points to a file inside the project, which
 must be added to `.gitignore`. The proposed evolution replaces it with a
 **SecretResolver** that reads secrets from *outside* the project entirely.
 
 The **non-secret structural parts** of each connection (host, port, dbname,
-username, SSL mode, cert path) live in `.spinxconfig/connections/` (see §4)
-and are committed. SecretResolver only handles the **values that must stay
-secret** — passwords, tokens, and full connection URLs.
+username, SSL mode, cert path) live in `~/config/spinx/<reponame>/accessories/<provider>/accessories.json`
+(see §4). SecretResolver only handles the **values that must stay secret** —
+passwords, tokens, and full connection URLs.
 
 ### Where secrets come from
 
 | Runtime | Source |
 |---------|--------|
-| **Local development** | `~/config/spinx/secrets/secrets.<env>.json` |
+| **Local development** | `~/config/spinx/<reponame>/secrets/secrets.<env>.json` |
 | **CI (GitHub Actions)** | Repository secrets → runner env vars; SecretResolver auto-detects |
 | **Future: cloud vault** | `secretsVault:` → AWS Secrets Manager / GCP Secret Manager / Azure Key Vault |
 
@@ -490,23 +580,26 @@ secret** — passwords, tokens, and full connection URLs.
 
 ```
 ~/config/spinx/
-├── secrets/
-│   ├── secrets.dev.json    ← dev secrets  (local only ❌)
-│   ├── secrets.qa.json     ← qa secrets   (local only ❌)
-│   └── secrets.prod.json   ← prod secrets (local only ❌)
-└── kamal/
-    └── myapp/
-        └── deploy.yml      ← generated Kamal config (regenerated each deploy)
+└── myapp/                                  ← <reponame>
+    ├── secrets/
+    │   ├── secrets.dev.json                ← dev secrets  (local only ❌)
+    │   ├── secrets.qa.json                 ← qa secrets   (local only ❌)
+    │   └── secrets.prod.json               ← prod secrets (local only ❌)
+    ├── accessories/
+    │   ├── kamal/accessories.json          ← VPS connection details (local only ❌)
+    │   └── aws/accessories.json            ← RDS/ElastiCache details (local only ❌)
+    └── kamal/
+        └── deploy.yml                      ← generated Kamal config (local only ❌)
 ```
 
 ### Secrets file format (JSON)
 
 Contains **only** the sensitive values. The structural parts of the
-connection are already in `.spinxconfig/connections/` (commit ✅). SecretResolver
+connection (host, port, dbname) are in `accessories.json`. SecretResolver
 merges the two at deploy time.
 
 ```json
-// ~/config/spinx/secrets/secrets.prod.json — fill in real values
+// ~/config/spinx/myapp/secrets/secrets.prod.json — fill in real values
 {
   "KAMAL_REGISTRY_PASSWORD": "CHANGE_ME",
   "POSTGRES_PASSWORD":       "CHANGE_ME",
@@ -518,9 +611,9 @@ merges the two at deploy time.
 }
 ```
 
-`spinx setup` creates the skeleton JSON files with `CHANGE_ME` placeholders,
-pre-populated from the host/port/dbname already in `.spinxconfig/connections/`.
-You only need to fill in the actual password values.
+`spinx setup` creates the skeleton JSON files with `CHANGE_ME` placeholders
+(pre-populated with host/port/dbname from the accessories.json answers) and
+**prints the full content** to the terminal so you can copy values immediately.
 
 ### CI pipelines — GitHub Actions
 
@@ -574,32 +667,52 @@ wires them to each provider module automatically:
 On Kamal every accessory runs as a **sidecar container** managed by Kamal
 alongside the main app on the same VPS.
 
-Spinx reads `spinx.yaml`, expands the accessory defaults, generates a
-`deploy.yml` into `~/config/spinx/kamal/<project>/deploy.yml`, and invokes
-Kamal from there. The `deploy.yml` **never lives in the project directory**.
+Spinx reads `spinx.yaml` (mandatory fields) + `~/config/spinx/myapp/accessories/kamal/accessories.json`
+(host IPs and certificates), expands everything into a `deploy.yml`, and writes
+it to `~/config/spinx/myapp/kamal/deploy.yml`. The `deploy.yml` **never lives
+in the project directory**.
 
-### Accessory default expansion
+### What Spinx expands for Kamal
 
 ```yaml
 # spinx.yaml (what you write)
 accessories:
-  postgres: true
-  redis: true
+  postgres:
+    dbname: "myapp"
+    username: "myapp"
+    password: "POSTGRES_PASSWORD"
+    connectionUrl: "DATABASE_URL"
+
+  redis:
+    password: "REDIS_PASSWORD"
+    connectionUrl: "REDIS_URL"
+
   queue:
+    password: "QUEUE_PASSWORD"
+    connectionUrl: "QUEUE_URL"
     args:
       MAXMEMORY: "256mb"
 ```
 
+```json
+// ~/config/spinx/myapp/accessories/kamal/accessories.json (set during spinx setup)
+{
+  "postgres": { "host": "10.0.0.1", "port": 5432, "sslMode": "disable" },
+  "redis":    { "host": "10.0.0.1", "port": 6379 },
+  "queue":    { "host": "10.0.0.1", "port": 6380 }
+}
+```
+
 ```yaml
-# Generated ~/config/spinx/kamal/myapp/deploy.yml (what Kamal sees)
+# Generated ~/config/spinx/myapp/kamal/deploy.yml (what Kamal sees)
 accessories:
-  postgres:
+  myapp-postgres:
     image: postgres:16
     host: 10.0.0.1
     port: 5432
     env:
       clear:
-        POSTGRES_DB: myapp
+        POSTGRES_DB:   myapp
         POSTGRES_USER: myapp
       secret:
         - POSTGRES_PASSWORD
@@ -607,14 +720,17 @@ accessories:
     volumes:
       - /var/lib/postgresql/data:/var/lib/postgresql/data
 
-  redis:
+  myapp-redis:
     image: redis:7.2-alpine
     host: 10.0.0.1
     port: 6379
+    env:
+      secret:
+        - REDIS_PASSWORD
     volumes:
       - /var/lib/redis:/data
 
-  queue:
+  myapp-queue:
     image: redis:7.2-alpine
     host: 10.0.0.1
     port: 6380
@@ -622,6 +738,8 @@ accessories:
       clear:
         MAXMEMORY_POLICY: noeviction
         MAXMEMORY: "256mb"       # ← from args:
+      secret:
+        - QUEUE_PASSWORD
     volumes:
       - /var/lib/queue-data:/data
 ```
@@ -629,7 +747,7 @@ accessories:
 Full generated `deploy.yml`:
 
 ```yaml
-# Generated by Spinx — ~/config/spinx/kamal/myapp/deploy.yml
+# Generated by Spinx — ~/config/spinx/myapp/kamal/deploy.yml
 service: myapp
 image: ghcr.io/myorg/myapp
 servers:
@@ -645,6 +763,8 @@ env:
   secret:
     - DATABASE_URL
     - POSTGRES_PASSWORD
+    - REDIS_URL
+    - QUEUE_URL
 accessories:
   # ... expanded as shown above ...
 ```
@@ -653,37 +773,46 @@ accessories:
 
 ## 9. Cloud providers — accessories map to managed services
 
-On cloud platforms the `accessories` block in `spinx.yaml` is **the same**
-as the Kamal version — Spinx reads `.spinxconfig/connections/<accessory>.<env>.json`
-to get the host/port/dbname and calls SecretResolver for the password.
-The only change between providers is the `host` value inside the connection file.
+On cloud platforms the `accessories` block in `spinx.yaml` is **identical**
+to the Kamal version. Spinx reads the mandatory fields from `spinx.yaml` and
+the host/endpoint from `~/config/spinx/myapp/accessories/<provider>/accessories.json`,
+then calls SecretResolver for the password. Only the `accessories.json` changes
+between providers — `spinx.yaml` never changes.
 
-### Same `spinx.yaml`, different connection files
+### Same `spinx.yaml`, different accessories.json per provider
 
 ```
-spinx.yaml
+spinx.yaml — unchanged across all providers:
   accessories:
-    postgres: true   ← identical across all providers
-    redis: true
-    queue: true
+    postgres:
+      dbname: "myapp"
+      username: "myapp"
+      password: "POSTGRES_PASSWORD"
+      connectionUrl: "DATABASE_URL"
+    redis:
+      password: "REDIS_PASSWORD"
+      connectionUrl: "REDIS_URL"
+    queue:
+      password: "QUEUE_PASSWORD"
+      connectionUrl: "QUEUE_URL"
 
-.spinxconfig/connections/postgres.prod.json  (kamal / local Postgres on VPS):
-  "host": "10.0.0.1",  "dbname": "myapp_prod",  "sslMode": "disable"
+~/config/spinx/myapp/accessories/kamal/accessories.json  (VPS):
+  postgres.host = "10.0.0.1",  sslMode = "disable"
 
-.spinxconfig/connections/postgres.prod.json  (aws / RDS):
-  "host": "myapp.xyz.rds.amazonaws.com",  "sslMode": "verify-full",
-  "sslCert": ".spinxconfig/certs/rds-ca.pem"
+~/config/spinx/myapp/accessories/aws/accessories.json  (RDS):
+  postgres.host = "myapp.xyz.rds.amazonaws.com",  sslMode = "verify-full"
+  postgres.sslCert = "~/.spinxconfig/certs/rds-ca.pem"
 
-.spinxconfig/connections/postgres.prod.json  (gcp / Cloud SQL):
-  "host": "/cloudsql/proj:region:instance",  "sslMode": "disable"
+~/config/spinx/myapp/accessories/gcp/accessories.json  (Cloud SQL):
+  postgres.host = "/cloudsql/proj:region:instance"
 
-.spinxconfig/connections/postgres.prod.json  (azure / Azure DB for PostgreSQL):
-  "host": "myapp-db.postgres.database.azure.com",  "sslMode": "require"
+~/config/spinx/myapp/accessories/azure/accessories.json  (Azure DB):
+  postgres.host = "myapp-db.postgres.database.azure.com",  sslMode = "require"
 ```
 
-The actual password values live only in `~/config/spinx/secrets/secrets.prod.json`
+The actual password values live only in `~/config/spinx/myapp/secrets/secrets.prod.json`
 on your local machine (or in CI repo secrets). Spinx assembles the full
-`DATABASE_URL` from the connection file + the resolved secret at deploy time.
+`DATABASE_URL` from `accessories.json` + the resolved secret at deploy time.
 
 ### Accessory to managed service mapping
 
@@ -691,7 +820,7 @@ on your local machine (or in CI repo secrets). Spinx assembles the full
 |-----------|------------|---------------|----------------------|
 | `postgres` | Amazon RDS | Cloud SQL | Azure Database for PostgreSQL |
 | `redis` | Amazon ElastiCache | Cloud Memorystore | Azure Cache for Redis |
-| `queue` | Amazon SQS | Cloud Pub/Sub | Azure Service Bus |
+| `queue` | Amazon SQS / ElastiCache | Cloud Pub/Sub | Azure Service Bus |
 
 ---
 
@@ -726,9 +855,10 @@ providers:
 
 ## 11. `spinx setup` — interactive scaffolding with fast onboarding
 
-`spinx setup` asks a few questions and generates everything — `spinx.yaml`,
-`.spinxconfig/connections/` files, env files, and secrets templates. On
-subsequent runs it rescans `spinx.yaml` and validates/updates existing config.
+`spinx setup` asks a few questions, generates all files, and **prints the full
+credential summary** at the end so you can immediately copy values into the
+secrets file. On subsequent runs it rescans `spinx.yaml` and validates/updates
+existing config.
 
 ```
 $ spinx setup
@@ -749,10 +879,18 @@ $ spinx setup
       azure  (Azure Container Apps)
 
 ? Include PostgreSQL?  (Y/n)  Y
-? Include Redis cache? (Y/n)  Y
-? Include message queue (separate Redis)? (Y/n)  Y
+  Postgres DB name:    [myapp]
+  Postgres username:   [myapp]
+  Postgres password secret key: [POSTGRES_PASSWORD]
+  Connection URL secret key:    [DATABASE_URL]
 
-→ Generating connection config files in .spinxconfig/connections/ ...
+? Include Redis cache? (Y/n)  Y
+  Redis password secret key:    [REDIS_PASSWORD]
+  Connection URL secret key:    [REDIS_URL]
+
+? Include message queue (separate Redis)? (Y/n)  Y
+  Queue password secret key:    [QUEUE_PASSWORD]
+  Connection URL secret key:    [QUEUE_URL]
 
   For kamal:
 ? Docker image: [ghcr.io/myorg/myapp]
@@ -763,23 +901,44 @@ $ spinx setup
 ? Region: [us-east-1]   CPU: [512]   Memory: [1024]
 ? RDS hostname (postgres): [myapp.xyz.rds.amazonaws.com]
 ? ElastiCache hostname (redis): [myapp.cache.amazonaws.com]
+? ElastiCache hostname (queue): [myapp-queue.cache.amazonaws.com]
 
-✔  spinx.yaml                                          (commit ✅)
-✔  .spinxconfig/connections/postgres.dev.json          (commit ✅)
-✔  .spinxconfig/connections/postgres.qa.json           (commit ✅)
-✔  .spinxconfig/connections/postgres.prod.json         (commit ✅)
-✔  .spinxconfig/connections/redis.dev.json             (commit ✅)
-✔  .spinxconfig/connections/redis.prod.json            (commit ✅)
-✔  .spinxconfig/connections/queue.dev.json             (commit ✅)
-✔  .spinxconfig/connections/queue.prod.json            (commit ✅)
-✔  application.env                                     (commit ✅)
-✔  application.dev.env                                 (commit ✅)
-✔  application.qa.env                                  (commit ✅)
-✔  application.prod.env                                (commit ✅)
-✔  ~/config/spinx/secrets/secrets.dev.json             (local only ❌)
-✔  ~/config/spinx/secrets/secrets.qa.json              (local only ❌)
-✔  ~/config/spinx/secrets/secrets.prod.json            (local only ❌)
-✔  ~/config/spinx/kamal/myapp/deploy.yml               (local only ❌)
+✔  spinx.yaml                                                    (commit ✅)
+✔  .env                                                          (commit ✅)
+✔  .env.dev                                                      (commit ✅)
+✔  .env.qa                                                       (commit ✅)
+✔  .env.prod                                                     (commit ✅)
+✔  ~/config/spinx/myapp/accessories/kamal/accessories.json       (local only ❌)
+✔  ~/config/spinx/myapp/accessories/aws/accessories.json         (local only ❌)
+✔  ~/config/spinx/myapp/secrets/secrets.dev.json                 (local only ❌)
+✔  ~/config/spinx/myapp/secrets/secrets.qa.json                  (local only ❌)
+✔  ~/config/spinx/myapp/secrets/secrets.prod.json                (local only ❌)
+✔  ~/config/spinx/myapp/kamal/deploy.yml                         (local only ❌)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  CREDENTIAL SUMMARY — fill in passwords and commit to vault
+  Saved to ~/config/spinx/myapp/secrets/secrets.prod.json
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  KAMAL_REGISTRY_PASSWORD  → CHANGE_ME
+  POSTGRES_PASSWORD        → CHANGE_ME
+  DATABASE_URL             → postgresql://myapp:CHANGE_ME@myapp.xyz.rds.amazonaws.com:5432/myapp
+  REDIS_PASSWORD           → CHANGE_ME
+  REDIS_URL                → rediss://:CHANGE_ME@myapp.cache.amazonaws.com:6379
+  QUEUE_PASSWORD           → CHANGE_ME
+  QUEUE_URL                → rediss://:CHANGE_ME@myapp-queue.cache.amazonaws.com:6380
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ACCESSORY ENDPOINTS (kamal) — ~/config/spinx/myapp/accessories/kamal/accessories.json
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  postgres  → 10.0.0.1:5432  db=myapp  user=myapp  ssl=disable
+  redis     → 10.0.0.1:6379
+  queue     → 10.0.0.1:6380
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ACCESSORY ENDPOINTS (aws) — ~/config/spinx/myapp/accessories/aws/accessories.json
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  postgres  → myapp.xyz.rds.amazonaws.com:5432  ssl=verify-full
+  redis     → myapp.cache.amazonaws.com:6379  tls=true
+  queue     → myapp-queue.cache.amazonaws.com:6380  tls=true
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
 ### Generated `spinx.yaml`
@@ -790,17 +949,28 @@ $ spinx setup
 serviceName: "myapp"
 dockerfilePath: "Dockerfile"
 containerPort: 3000
-environmentFile: "application.env"
+environmentFile: ".env"
 
 environmentVariables:
   APP_ENV: "production"
 
-# Accessories — defaults are production-ready.
-# Add args: to override specific container env vars.
+# Accessories — declare mandatory fields here.
+# host/endpoint per provider lives in ~/config/spinx/myapp/accessories/<provider>/accessories.json
+# passwords live in ~/config/spinx/myapp/secrets/secrets.<env>.json
 accessories:
-  postgres: true
-  redis: true
-  queue: true
+  postgres:
+    dbname: "myapp"
+    username: "myapp"
+    password: "POSTGRES_PASSWORD"
+    connectionUrl: "DATABASE_URL"
+
+  redis:
+    password: "REDIS_PASSWORD"
+    connectionUrl: "REDIS_URL"
+
+  queue:
+    password: "QUEUE_PASSWORD"
+    connectionUrl: "QUEUE_URL"
 
 providers:
 
@@ -823,15 +993,15 @@ providers:
     enableHttps: true
 ```
 
-### Generated `~/config/spinx/secrets/secrets.prod.json`
+### Generated `~/config/spinx/myapp/secrets/secrets.prod.json`
 
-Pre-populated from the connection files — you only need to fill in passwords:
+Pre-populated from setup answers — fill in passwords only:
 
 ```json
 {
   "KAMAL_REGISTRY_PASSWORD": "CHANGE_ME",
   "POSTGRES_PASSWORD":       "CHANGE_ME",
-  "DATABASE_URL":            "postgresql://myapp:CHANGE_ME@myapp.xyz.rds.amazonaws.com:5432/myapp_prod",
+  "DATABASE_URL":            "postgresql://myapp:CHANGE_ME@myapp.xyz.rds.amazonaws.com:5432/myapp",
   "REDIS_PASSWORD":          "CHANGE_ME",
   "REDIS_URL":               "rediss://:CHANGE_ME@myapp.cache.amazonaws.com:6379",
   "QUEUE_PASSWORD":          "CHANGE_ME",
@@ -839,30 +1009,23 @@ Pre-populated from the connection files — you only need to fill in passwords:
 }
 ```
 
-The host/port/dbname values come from `.spinxconfig/connections/` — already
-committed. You only ever type in actual secret values on your local machine.
-
 ### File tracking
 
 ```
-spinx.yaml                                          ← commit ✅
-.spinxconfig/connections/postgres.dev.json          ← commit ✅
-.spinxconfig/connections/postgres.qa.json           ← commit ✅
-.spinxconfig/connections/postgres.prod.json         ← commit ✅
-.spinxconfig/connections/redis.dev.json             ← commit ✅
-.spinxconfig/connections/redis.prod.json            ← commit ✅
-.spinxconfig/connections/queue.dev.json             ← commit ✅
-.spinxconfig/connections/queue.prod.json            ← commit ✅
-.spinxconfig/certs/rds-ca.pem                       ← commit ✅  (public CA cert)
-application.env                                     ← commit ✅
-application.dev.env                                 ← commit ✅
-application.qa.env                                  ← commit ✅
-application.prod.env                                ← commit ✅
+# Committed to the repo (safe — no secrets):
+spinx.yaml                            ← commit ✅
+.env                                  ← commit ✅
+.env.dev                              ← commit ✅
+.env.qa                               ← commit ✅
+.env.prod                             ← commit ✅
 
-~/config/spinx/secrets/secrets.dev.json             ← local only ❌
-~/config/spinx/secrets/secrets.qa.json              ← local only ❌
-~/config/spinx/secrets/secrets.prod.json            ← local only ❌
-~/config/spinx/kamal/myapp/deploy.yml               ← local only ❌
+# Local only — never committed:
+~/config/spinx/myapp/accessories/kamal/accessories.json   ❌
+~/config/spinx/myapp/accessories/aws/accessories.json     ❌
+~/config/spinx/myapp/secrets/secrets.dev.json             ❌
+~/config/spinx/myapp/secrets/secrets.qa.json              ❌
+~/config/spinx/myapp/secrets/secrets.prod.json            ❌
+~/config/spinx/myapp/kamal/deploy.yml                     ❌
 ```
 
 ---
@@ -872,22 +1035,26 @@ application.prod.env                                ← commit ✅
 ```
 Stage 1 — VPS with Kamal
 ────────────────────────────────────────────────────────────────────
-  spinx setup   → spinx.yaml + .spinxconfig/connections/*.dev.json
-                  + env files + secrets templates
+  spinx setup   → spinx.yaml (mandatory accessory fields)
+                  ~/config/spinx/myapp/accessories/kamal/accessories.json
+                  ~/config/spinx/myapp/secrets/secrets.*.json
+                  Credentials printed to terminal
   spinx deploy --env prod
-  └── accessories: postgres/redis/queue run as sidecar containers on VPS
-  └── Spinx reads .spinxconfig/connections/postgres.prod.json for host/dbname
+  └── postgres/redis/queue run as sidecar containers on VPS
+  └── accessories.json provides host IP
   └── SecretResolver fills in POSTGRES_PASSWORD + DATABASE_URL
-  └── Kamal deploy.yml generated to ~/config/spinx/kamal/myapp/
+  └── Kamal deploy.yml generated to ~/config/spinx/myapp/kamal/
+  spinx remove        → stop and remove the running containers
+  spinx uninstall     → remove containers + volumes + all Spinx-created resources
 
 Stage 2 — Cloud (managed services)
 ────────────────────────────────────────────────────────────────────
   spinx setup   → adds aws/gcp/azure provider module to spinx.yaml
-                  updates .spinxconfig/connections/*.prod.json with cloud hosts
+                  ~/config/spinx/myapp/accessories/aws/accessories.json (RDS endpoints)
   spinx deploy --env prod
   └── same spinx.yaml accessories block — unchanged
-  └── .spinxconfig/connections/postgres.prod.json host now points at RDS
-  └── secrets.prod.json still only holds passwords/URLs — same keys, new values
+  └── accessories/aws/accessories.json provides RDS/ElastiCache hosts
+  └── secrets/secrets.prod.json holds passwords — same keys, new values
   In CI:
   └── SecretResolver reads from runner env vars (GitHub repo secrets)
   └── no secrets files on disk
@@ -899,15 +1066,15 @@ Stage 3 — Cloud secret vaults  (proposed)
       provider: "aws-secrets-manager"
       secretId: "myapp/prod"
   └── SecretResolver fetches from vault at deploy time — no local JSON needed
-  └── .spinxconfig/connections/ files remain in repo as structural reference
+  └── accessories.json still drives host/endpoint configuration
 
 Stage 4 — Kubernetes  (proposed)
 ────────────────────────────────────────────────────────────────────
   spinx setup   → adds k8s provider module to spinx.yaml
   spinx deploy --env prod
-  └── .spinxconfig/connections/ → drives Kubernetes ConfigMap for accessory endpoints
+  └── accessories/k8s/accessories.json → drives Kubernetes ConfigMap for endpoints
   └── SecretResolver → Kubernetes Secret manifests for passwords
-  └── accessories: true → Deployment + Service + PVC manifests generated
+  └── accessories block → Deployment + Service + PVC manifests generated
 ```
 
 ### What needs to change in Spinx for each stage
@@ -916,14 +1083,16 @@ Stage 4 — Kubernetes  (proposed)
 |-------|--------------|-------------|
 | **Kamal full stack** | ✅ works today — uses existing `secretsFile` | ✅ none |
 | **`spinx.yaml` single file + provider modules** | New top-level `providers:` map | `ConfigLoader` reads `spinx.yaml`, dispatches per provider key |
-| **Accessory defaults + `args:`** | `accessories: true` short-form | `AccessoryExpander` — fills defaults, merges `args:` |
-| **`.spinxconfig/connections/` folder** | New JSON files per accessory + env | `SetupCommand` generates them; `AccessoryExpander` reads them at deploy |
-| **`.spinxconfig/certs/` folder** | CA certs committed alongside connection files | Deployers mount cert path from connection JSON `sslCert` field |
-| **`spinx setup` interactive** | ✅ none | New `SetupCommand` — prompts + file generators for connections |
-| **SecretResolver — local** | Remove `secretsFile`; add SecretResolver | Reads `~/config/spinx/secrets/secrets.<env>.json` |
+| **Mandatory accessory fields** | `dbname`, `username`, `password`, `connectionUrl` required | `AccessoryExpander` validates mandatory fields, reads from `accessories.json` |
+| **`~/config/spinx/<repo>/accessories/<provider>/accessories.json`** | New per-repo per-provider JSON | `SetupCommand` generates; printed after setup; `AccessoryExpander` reads at deploy |
+| **`~/config/spinx/<repo>/secrets/`** | New path (was `secretsFile` in project) | SecretResolver reads `secrets.<env>.json` from home config dir |
+| **`spinx setup` interactive** | ✅ none | New `SetupCommand` — prompts + generators; prints credential summary |
+| **`spinx setup` credential print** | ✅ none | `SetupCommand` prints full secrets.json + accessories.json to terminal |
+| **SecretResolver — local** | Remove `secretsFile`; add SecretResolver | Reads `~/config/spinx/<repo>/secrets/secrets.<env>.json` |
 | **SecretResolver — CI** | ✅ none | Auto-detects `CI=true`, reads runner env vars |
-| **`--env` profile flag** | ✅ none | Merge `application.<env>.env`; pass to SecretResolver |
-| **`spinx remove` command** | ✅ none | Alias of existing `destroy` action |
-| **Kamal config in home dir** | ✅ none | Generate `deploy.yml` to `~/config/spinx/kamal/<project>/` |
+| **`--env` profile flag** | ✅ none | Merge `.env.<profile>`; pass to SecretResolver |
+| **`spinx remove` command** | ✅ none | Remove running deployment only |
+| **`spinx uninstall` command** | ✅ none | Remove all infra/resources created by Spinx |
+| **Kamal config in home dir** | ✅ none | Generate `deploy.yml` to `~/config/spinx/<repo>/kamal/` |
 | **Cloud secret vaults** | Add `secretsVault:` field | SecretResolver vault backend |
 | **Kubernetes provider** | Add `namespace`, `storageClass`, `ingressClass` | New `KubernetesDeployer` + manifest generators |
